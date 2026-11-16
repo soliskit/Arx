@@ -1,0 +1,65 @@
+name: Inspect private section API symbols
+
+on:
+  pull_request:
+    types: [opened]
+    branches: [main]
+    paths: [.github/workflows/sections-selector-probe.yml]
+
+permissions: {}
+
+jobs:
+  inspect:
+    if: github.head_ref == 'maintenance/sections-selector-probe'
+    runs-on: xcode-27
+    timeout-minutes: 5
+    steps:
+      - name: Compile and inspect runtime symbols without opening a store
+        run: |
+          set -euo pipefail
+          sw_vers
+          uname -m
+          xcrun clang --version
+          PROBE_DIR="$(mktemp -d "${RUNNER_TEMP}/section-symbols.XXXXXX")"
+          trap 'rm -rf "${PROBE_DIR}"' EXIT
+          cat > "${PROBE_DIR}/probe.m" <<'OBJC'
+          #import <Foundation/Foundation.h>
+          #include <dlfcn.h>
+          #include <objc/runtime.h>
+          #include <stdio.h>
+
+          struct Check { const char *className; const char *selectorName; int classMethod; };
+
+          int main(void) {
+            @autoreleasepool {
+              void *framework = dlopen("/System/Library/PrivateFrameworks/ReminderKit.framework/ReminderKit", RTLD_LAZY | RTLD_LOCAL);
+              printf("framework_present=%s\n", framework ? "true" : "false");
+              if (!framework) return 0;
+              const struct Check checks[] = {
+                {"REMObjectID", "objectIDWithURL:", 1},
+                {"REMStore", "fetchReminderWithObjectID:error:", 0},
+                {"REMStore", "fetchListWithObjectID:error:", 0},
+                {"REMStore", "fetchListSectionWithObjectID:error:", 0},
+                {"REMSaveRequest", "initWithStore:", 0},
+                {"REMSaveRequest", "updateList:", 0},
+                {"REMSaveRequest", "saveSynchronouslyWithError:", 0},
+                {"REMListChangeItem", "sectionsContextChangeItem", 0},
+                {"REMListSectionContextChangeItem", "setUnsavedMembershipsOfRemindersInSections:", 0},
+                {"REMMembership", "initWithMemberIdentifier:groupIdentifier:isObsolete:modifiedOn:", 0},
+                {"REMMemberships", "initWithMemberships:", 0}
+              };
+              for (size_t i = 0; i < sizeof(checks) / sizeof(checks[0]); i++) {
+                Class cls = objc_getClass(checks[i].className);
+                SEL selector = sel_registerName(checks[i].selectorName);
+                Method method = !cls ? NULL : checks[i].classMethod
+                  ? class_getClassMethod(cls, selector) : class_getInstanceMethod(cls, selector);
+                printf("class=%s class_present=%s selector=%s selector_present=%s\n",
+                  checks[i].className, cls ? "true" : "false", checks[i].selectorName, method ? "true" : "false");
+              }
+              printf("store_constructed=false data_requested=false save_called=false\n");
+            }
+            return 0;
+          }
+          OBJC
+          xcrun clang -fobjc-arc -Wall -Wextra -Werror -framework Foundation "${PROBE_DIR}/probe.m" -o "${PROBE_DIR}/probe"
+          "${PROBE_DIR}/probe"
