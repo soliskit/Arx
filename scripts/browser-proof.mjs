@@ -21,7 +21,7 @@ const waitForExit=(child,milliseconds)=>new Promise(resolveExit=>{
   child.once('exit',onExit);
 });
 const stopChild=async(child,allowGracefulExit=false)=>{
-  if(!child||exited(child))return;
+  if(!child||child.pid===undefined||exited(child))return;
   if(allowGracefulExit&&await waitForExit(child,3000))return;
   child.kill('SIGTERM');
   if(await waitForExit(child,3000))return;
@@ -45,9 +45,22 @@ try{
     upstream.on('error',()=>{res.writeHead(503);res.end('{}');});req.pipe(upstream);
   });
   await new Promise(r=>proxy.listen(19443,'127.0.0.1',r));
-  browser=spawn(chrome,['--headless=new','--no-sandbox','--ignore-certificate-errors','--no-proxy-server','--host-resolver-rules=MAP bridge.example.test 127.0.0.1','--remote-debugging-port=0','--user-data-dir='+join(temporary,'chrome'),'about:blank'],{stdio:'ignore'});
+  browser=spawn(chrome,['--headless=new','--no-sandbox','--ignore-certificate-errors','--no-proxy-server','--host-resolver-rules=MAP bridge.example.test 127.0.0.1','--remote-debugging-port=0','--user-data-dir='+join(temporary,'chrome'),'about:blank'],{stdio:['ignore','ignore','pipe']});
+  let launchError,exitStatus;
+  let chromeStderr=Buffer.alloc(0);
+  browser.on('error',error=>{launchError=error;});
+  browser.on('exit',(code,signal)=>{exitStatus={code,signal};});
+  browser.stderr.on('data',chunk=>{chromeStderr=Buffer.concat([chromeStderr,chunk]).subarray(-8192);});
+  const startupFailure=reason=>Error('Fixture Chrome '+reason+'; launch error: '+(launchError?.message||'none')+'; exit: '+JSON.stringify(exitStatus||null)+'; stderr (latest 8 KiB):\n'+chromeStderr.toString('utf8'));
   const active=join(temporary,'chrome','DevToolsActivePort');
-  for(let i=0;i<100&&!existsSync(active);i++)await wait(100);
+  for(let i=0;i<100&&!existsSync(active);i++){
+    if(launchError)throw startupFailure('launch failed');
+    if(exitStatus)throw startupFailure('exited before readiness');
+    await wait(100);
+  }
+  if(launchError)throw startupFailure('launch failed');
+  if(exitStatus)throw startupFailure('exited before readiness');
+  if(!existsSync(active))throw startupFailure('readiness timed out');
   const port=readFileSync(active,'utf8').split('\n')[0];
   const targets=await(await fetch('http://127.0.0.1:'+port+'/json/list')).json();
   ws=new WebSocket(targets.find(t=>t.type==='page').webSocketDebuggerUrl);await new Promise((r,j)=>{ws.addEventListener('open',r,{once:true});ws.addEventListener('error',j,{once:true});});
