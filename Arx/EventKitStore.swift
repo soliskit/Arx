@@ -40,8 +40,10 @@ import Foundation
     let destination = try writable(list)
     let item = EKReminder(eventStore: store)
     item.calendar = destination
-    try apply(fields, to: item, preserving: nil)
-    do { try store.save(item, commit: true) } catch {
+    do {
+      try apply(fields, to: item, preserving: nil)
+      try store.save(item, commit: true)
+    } catch {
       item.reset()
       throw BridgeFailure.ambiguous
     }
@@ -52,9 +54,11 @@ import Foundation
     guard snapshot(item) == base else { throw BridgeFailure.conflict }
     _ = try writable(base.listID)
     let destination = try writable(updated.listID)
-    try apply(updated.fields, to: item, preserving: base)
-    item.calendar = destination
-    do { try store.save(item, commit: true) } catch {
+    do {
+      try apply(updated.fields, to: item, preserving: base)
+      item.calendar = destination
+      try store.save(item, commit: true)
+    } catch {
       item.reset()
       throw BridgeFailure.ambiguous
     }
@@ -154,16 +158,21 @@ import Foundation
       id: r.calendarItemIdentifier, listID: r.calendar.calendarIdentifier, fields: f,
       unsupportedAlarms: unsupported)
   }
-  private func apply(_ f: ReminderFields, to r: EKReminder, preserving base: SharedReminder?) throws
-  {
+  func apply(_ f: ReminderFields, to r: EKReminder, preserving base: SharedReminder?) throws {
     // Unchanged advanced fields are not reconstructed, preserving unsupported patterns.
     var basic = f
     basic.repeats = []
     basic.alarms = []
     try basic.validate()
+    // Validate every changed advanced field before touching the EventKit object.
     if f.alarms != base?.fields.alarms {
       guard base?.unsupportedAlarms != true else { throw BridgeFailure.invalid }
       for value in f.alarms { try value.validate() }
+    }
+    if f.repeats != base?.fields.repeats {
+      for value in f.repeats { try value.validate() }
+    }
+    if f.alarms != base?.fields.alarms {
       r.alarms = f.alarms.map { value in
         let a: EKAlarm
         if let absolute = value.absoluteDate {
@@ -207,8 +216,8 @@ import Foundation
     r.url = f.url.flatMap(URL.init(string:))
     r.location = f.location
     r.priority = f.priority
-    r.startDateComponents = components(f.start)
-    r.dueDateComponents = components(f.due)
+    if f.start != base?.fields.start { r.startDateComponents = components(f.start) }
+    if f.due != base?.fields.due { r.dueDateComponents = components(f.due) }
     r.isCompleted = f.completed
   }
 }

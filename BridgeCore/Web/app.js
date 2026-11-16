@@ -76,10 +76,11 @@ function dateValue(name,original){
   if(time){const [hour,minute]=time.split(':').map(Number);Object.assign(value,{hour,minute,timeZone:el('timezone').value});}
   return value;
 }
-async function run(action){if(busy)return;busy=true;try{await action();}catch(error){status(error.message);}finally{busy=false;}}
+function controlsBusy(value){for(const button of document.querySelectorAll('button'))button.disabled=value;}
+async function run(action){if(busy)return;busy=true;controlsBusy(true);try{await action();}catch(error){status(error.message);}finally{busy=false;controlsBusy(false);}}
 el('pair-form').addEventListener('submit',event=>{event.preventDefault();run(async()=>{const secret=el('secret').value;el('secret').value='';await api('/api/pair',{secret});await refresh();});});
 el('refresh').addEventListener('click',()=>run(refresh));el('forget').addEventListener('click',()=>{clear();status('Page cleared. Revoke this client in the Mac app to end its session.');});
-el('new').addEventListener('click',()=>openEditor(null));el('cancel-edit').addEventListener('click',()=>{editing=null;el('editor').hidden=true;});
+el('new').addEventListener('click',()=>run(()=>openEditor(null)));el('cancel-edit').addEventListener('click',()=>{editing=null;el('editor').hidden=true;});
 el('edit-form').addEventListener('submit',event=>{event.preventDefault();run(async()=>{
   const f=structuredClone(editing?.fields||{completed:false});
   for(const name of ['title','notes','url','location']){f[name]=el(name).value||undefined;}

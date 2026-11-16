@@ -120,9 +120,13 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "6.2.1"
+      - name: Install the pinned Swift toolchain
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 2 -o "$RUNNER_TEMP/swift.tar.gz" https://download.swift.org/swift-6.4.1-release/ubuntu2204/swift-6.4.1-RELEASE/swift-6.4.1-RELEASE-ubuntu22.04.tar.gz
+          echo "e9ec2ff05ac0fc89bf2e7cecdee5da4d398898a768d7ee2b86a59d2a7f01c44b  $RUNNER_TEMP/swift.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/swift.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/swift-6.4.1-RELEASE-ubuntu22.04/usr/bin" >> "$GITHUB_PATH"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

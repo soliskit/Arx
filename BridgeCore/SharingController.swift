@@ -147,9 +147,14 @@ import Foundation
     let encoded = try encoder.encode(command)
     if let previous = clients[id]!.operations[command.operationID] {
       guard previous.0 == encoded else { throw BridgeFailure.conflict }
-      return previous.1
+      guard let prior = previous.1 else { return nil }
+      // Cached contents are never authoritative after external moves or edits.
+      let current = try store.current(prior.id)
+      _ = try require(id, list: current.listID)
+      return current
     }
-    guard !clients[id]!.uncertain.contains(command.operationID), clients[id]!.operations.count < 500
+    guard !clients[id]!.uncertain.contains(command.operationID),
+      clients[id]!.operations.count + clients[id]!.uncertain.count < 500
     else { throw BridgeFailure.ambiguous }
     if let fields = command.fields {
       var basic = fields
@@ -165,12 +170,12 @@ import Foundation
     }
     let result: SharedReminder?
     // Mark before entering store: a throwing save may already have committed.
-    clients[id]!.uncertain.insert(command.operationID)
     do {
       if command.action == .create {
         guard let fields = command.fields, command.itemID == nil, command.base == nil else {
           throw BridgeFailure.invalid
         }
+        clients[id]!.uncertain.insert(command.operationID)
         result = try store.create(in: command.listID, fields: fields)
       } else {
         guard let itemID = command.itemID, let base = command.base,
@@ -187,17 +192,21 @@ import Foundation
             throw BridgeFailure.invalid
           }
           current.fields = fields
+          clients[id]!.uncertain.insert(command.operationID)
           result = try store.save(current, replacing: base)
         case .move:
           guard let destination = command.destination else { throw BridgeFailure.invalid }
           _ = try require(id, list: destination, action: .move)
           current.listID = destination
+          clients[id]!.uncertain.insert(command.operationID)
           result = try store.save(current, replacing: base)
         case .complete, .reopen:
           current.fields.completed = command.action == .complete
+          clients[id]!.uncertain.insert(command.operationID)
           result = try store.save(current, replacing: base)
         case .delete:
           guard command.confirmation == current.fields.title else { throw BridgeFailure.invalid }
+          clients[id]!.uncertain.insert(command.operationID)
           try store.remove(current)
           result = nil
         }

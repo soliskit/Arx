@@ -10,6 +10,8 @@ This implementation needs automated qualification and separate acceptance on an 
 
 Apple grants full Reminders access. Arx enforces narrower list and action grants in its server. Selecting a list in the native sidebar is not a macOS-enforced per-list permission. A serious app flaw could bypass that narrower boundary.
 
+A read fetch currently rejects lists with more than 5,000 reminders after fetching them. It does not truncate or claim a complete result. This limit needs review for larger lists.
+
 Each client has independent list, read, change and deletion grants. New grants start empty. Browsing/highlighting a list does not grant access. Changing the form affects only the next client: revoke and pair again to change an existing grant. Moves require both lists to be granted and writable. Deletion requires its own grant and exact-title confirmation.
 
 The HTTP listener binds only to `127.0.0.1`. It expects the configured HTTPS hostname and forwarded HTTPS protocol. These checks are not authentication for other software already running on the Mac. A configured connector makes the service remotely reachable; it does not by itself provide visitor authentication.

@@ -91,4 +91,20 @@ import Testing
     try controller.start()
     #expect(throws: BridgeFailure.denied) { try controller.sessionState(token) }
   }
+  @Test func uncertainAndSuccessfulOperationsShareOneBound() throws {
+    let store = UncertainStore()
+    let controller = SharingController(store: store)
+    try controller.start()
+    let state = try controller.exchange(grant(controller))
+    for _ in 0..<510 {
+      #expect(throws: BridgeFailure.ambiguous) {
+        try controller.mutate(
+          state.token, csrf: state.csrf,
+          command: .init(
+            action: .create, listID: "inbox", fields: .init(title: "Uncertain fixture")))
+      }
+    }
+    #expect(store.fixture.rows.count == 502)
+  }
+
 }

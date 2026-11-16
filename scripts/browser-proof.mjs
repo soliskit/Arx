@@ -34,6 +34,7 @@ try{
   const send=(method,params={})=>new Promise((r,j)=>{const id=++serial;pending.set(id,{r,j});ws.send(JSON.stringify({id,method,params}));});
   const evaluate=async expression=>{const result=await send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;};
   const until=async expression=>{for(let i=0;i<100;i++){if(await evaluate(expression))return;await wait(100);}throw Error('Browser condition timed out: '+expression);};
+  const enabled=async()=>{await until('!busy');assert.equal(await evaluate('[...document.querySelectorAll("#reminders button")].some(b=>b.disabled)'),false);};
   const screenshot=async name=>{const {data}=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});writeFileSync(join(evidence,name+'.png'),Buffer.from(data,'base64'));};
   await send('Page.enable');await send('Page.navigate',{url:'https://bridge.example.test:19443/'});
   await until('document.getElementById("secret")!==null');
@@ -47,18 +48,18 @@ try{
   assert.equal(await evaluate('document.cookie.includes("__Host-arx")'),false);
   assert.equal(await evaluate('Object.keys(localStorage).length+Object.keys(sessionStorage).length'),0);
   await evaluate('[...document.querySelectorAll("#lists button")].find(b=>b.textContent==="Inbox").click()');await until('document.getElementById("reminders").textContent.includes("Return the library book")');
-  await screenshot('02-selected-list');
+  await enabled();await screenshot('02-selected-list');
   // Use the app's own UI to create, edit, complete/reopen and delete fixture data.
   await evaluate('document.getElementById("new").click();document.getElementById("title").value="<img src=x onerror=alert(1)>";document.getElementById("notes").value="Safe text";document.getElementById("edit-form").requestSubmit()');
   await until('document.getElementById("reminders").textContent.includes("<img src=x onerror=alert(1)>")');
   assert.equal(await evaluate('document.querySelectorAll("#reminders img").length'),0);
-  await screenshot('03-escaped-reminder');
+  await enabled();await screenshot('03-escaped-reminder');
   const findCard='[...document.querySelectorAll("#reminders article")].find(n=>n.textContent.includes("<img src=x onerror=alert(1)>"))';
   await evaluate(findCard+'.querySelector("button").click()');
   await until('!document.getElementById("editor").hidden');await screenshot('04-editor');
   await evaluate('document.getElementById("notes").value="Edited fixture notes";document.getElementById("edit-form").requestSubmit()');
   await until('document.getElementById("reminders").textContent.includes("Edited fixture notes")');
-  const clickAction=async label=>evaluate('[...'+findCard+'.querySelectorAll("button")].find(b=>b.textContent==='+JSON.stringify(label)+').click()');
+  const clickAction=async label=>{await enabled();return evaluate('[...'+findCard+'.querySelectorAll("button")].find(b=>b.textContent==='+JSON.stringify(label)+').click()');};
   await clickAction('Complete');
   await until(findCard+'.querySelector("h3").textContent.startsWith("✓")');
   await clickAction('Reopen');

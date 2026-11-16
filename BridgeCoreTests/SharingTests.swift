@@ -257,4 +257,25 @@ import Testing
       #expect(throws: BridgeFailure.invalid) { try BridgeConfiguration(origin: origin) }
     }
   }
+  @Test func replayAfterExternalMoveDoesNotDiscloseUnsharedContent() throws {
+    let (store, c, token, csrf) = try setup(lists: ["inbox"])
+    let command = Mutation(action: .create, listID: "inbox", fields: .init(title: "Replay fixture"))
+    let created = try #require(c.mutate(token, csrf: csrf, command: command))
+    store.rows[created.id]!.listID = "weekend"
+    #expect(throws: BridgeFailure.denied) { try c.mutate(token, csrf: csrf, command: command) }
+  }
+  @Test func rejectedCommandsDoNotConsumeUncertainStorage() throws {
+    let (_, c, token, csrf) = try setup()
+    for _ in 0..<600 {
+      #expect(throws: BridgeFailure.denied) {
+        try c.mutate(token, csrf: csrf, command: .init(action: .edit, listID: "inbox"))
+      }
+    }
+    #expect(
+      try c.mutate(
+        token, csrf: csrf,
+        command: .init(action: .create, listID: "inbox", fields: .init(title: "Still usable")))
+        != nil)
+  }
+
 }
