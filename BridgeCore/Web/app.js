@@ -8,6 +8,7 @@ let csrf = "",
   busy = false,
   nextPage = null,
   previousPage = null;
+const uncertainWrites = [];
 const el = (id) => document.getElementById(id);
 const text = (tag, value) => {
   const node = document.createElement(tag);
@@ -27,7 +28,15 @@ const formatTime = (d) =>
         ":",
       );
 function setStatus(value) {
-  el("status").textContent = value;
+  const warnings = uncertainWrites
+    .map(
+      (failure) =>
+        `At ${failure.at} a ${failure.action} did not confirm: ${failure.message}`,
+    )
+    .join(" ");
+  el("status").textContent = warnings
+    ? `${value} Unresolved writes: ${warnings} Check Reminders before repeating them.`
+    : value;
 }
 function clear() {
   nextPage = null;
@@ -45,6 +54,31 @@ function clear() {
   el("secret").value = "";
   el("lists").replaceChildren();
   el("reminders").replaceChildren();
+}
+function validSession(state) {
+  return (
+    typeof state?.csrf === "string" &&
+    state.csrf.length > 0 &&
+    Array.isArray(state.rights?.lists) &&
+    state.rights.lists.every((id) => typeof id === "string") &&
+    ["read", "manage", "delete"].every(
+      (key) => typeof state.rights[key] === "boolean",
+    )
+  );
+}
+async function sessionAlive() {
+  try {
+    const probe = await fetch("/api/session", {
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    if (probe.ok) {
+      return validSession(await probe.json()) ? "active" : "unknown";
+    }
+    return probe.status === 403 ? "denied" : "unknown";
+  } catch {
+    return "unknown";
+  }
 }
 async function api(path, body) {
   const options = {
@@ -65,13 +99,43 @@ async function api(path, body) {
   try {
     result = await response.json();
   } catch {
-    throw Error("Unexpected server response. Check the connector.");
+    if (response.ok) {
+      if (path === "/api/session") {
+        clear();
+      }
+      throw Error(
+        "Unexpected server response. Access could not be verified. Check the connector.",
+      );
+    }
+    result = { error: "Unexpected server response. Check the connector." };
   }
   if (!response.ok) {
+    let message = result?.error || "Request failed.";
     if (response.status === 403) {
-      clear();
+      const session =
+        path === "/api/session" || path === "/api/pair"
+          ? "denied"
+          : await sessionAlive();
+      if (session !== "active") {
+        clear();
+        if (session === "unknown") {
+          message =
+            "Access could not be verified. Refresh to check your session before pairing again.";
+        }
+      } else {
+        message =
+          "That list or reminder is no longer available to this client. Refresh to review.";
+      }
     }
-    throw Error(result.error || "Request failed.");
+    const failure = Error(message);
+    failure.status = response.status;
+    throw failure;
+  }
+  if (path === "/api/session" && !validSession(result)) {
+    clear();
+    throw Error(
+      "Access could not be verified. The session response was invalid. Refresh before pairing again.",
+    );
   }
   return result;
 }
@@ -87,6 +151,9 @@ function controlsBusy(value) {
 }
 async function run(action) {
   if (busy) {
+    setStatus(
+      "Still working on the previous request. Nothing new was sent. Try again in a moment.",
+    );
     return;
   }
   busy = true;
@@ -94,7 +161,9 @@ async function run(action) {
   try {
     await action();
   } catch (error) {
-    setStatus(error.message);
+    if (!error.reported) {
+      setStatus(error.message);
+    }
   } finally {
     busy = false;
     controlsBusy(false);
@@ -163,20 +232,51 @@ async function mutate(action, item, extra, reload) {
     base: item,
     ...extra,
   };
+  let result;
   try {
-    await api("/api/mutate", command);
-    await reload();
-    setStatus("Change saved. Review the refreshed result.");
+    result = await api("/api/mutate", command);
   } catch (error) {
     el("editor").hidden = true;
+    // 400 and 429 are refused before the store is touched. Anything else may have been saved.
+    const refused = error.status === 400 || error.status === 429;
+    if (!refused) {
+      uncertainWrites.push({
+        at: new Date().toLocaleTimeString(),
+        action,
+        message: error.message,
+      });
+    }
     setStatus(
-      `${error.message} Do not retry an uncertain change without checking Reminders.`,
+      refused
+        ? `${error.message} Nothing was changed.`
+        : `${error.message} This ${action} may or may not have been saved. Check Reminders before repeating it.`,
     );
+    error.reported = true;
     throw error;
   }
+  try {
+    await reload();
+  } catch (error) {
+    setStatus(
+      `Change saved, but the list could not be reloaded: ${error.message}`,
+    );
+    error.reported = true;
+    throw error;
+  }
+  const saved = result.reminder;
+  setStatus(
+    saved && saved.listID === listID && !rows.some((row) => row.id === saved.id)
+      ? "Change saved. The reminder is in this list but not on the page shown."
+      : "Change saved. Review the refreshed result.",
+  );
 }
-async function load(cursor = {}) {
-  const page = await api("/api/read", { listID, ...cursor });
+async function load(cursor = {}, target = listID) {
+  const page = await api("/api/read", { listID: target, ...cursor });
+  // Switch lists only once the new list has actually loaded.
+  listID = target;
+  for (const button of el("lists").children) {
+    button.classList.toggle("selected", button.dataset.listId === listID);
+  }
   rows = page.items;
   nextPage = page.next;
   previousPage = page.previous;
@@ -287,13 +387,9 @@ async function refresh() {
       list.title + (list.writable ? "" : " (read-only)"),
     );
     b.type = "button";
+    b.dataset.listId = list.id;
     b.className = list.id === listID ? "selected" : "";
-    b.addEventListener("click", () =>
-      run(async () => {
-        listID = list.id;
-        await load();
-      }),
-    );
+    b.addEventListener("click", () => run(() => load({}, list.id)));
     el("lists").append(b);
   }
   if (!lists.some((l) => l.id === listID)) {
