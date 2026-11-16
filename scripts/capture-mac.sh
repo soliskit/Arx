@@ -91,29 +91,24 @@ on describeNode(node)
   end tell
 end describeNode
 on findCheckbox(expectedID)
-  local root, nodes, matches, node, descendants, childNode
+  local root, nodes, matchCount, matchedNode, node
   tell application "System Events" to tell process "Arx"
     set root to outline 1 of scroll area 1 of group 1 of splitter group 1 of group 1 of window 1
     set nodes to entire contents of root
   end tell
-  set matches to {}
+  set matchCount to 0
+  set matchedNode to missing value
   repeat with nodeRef in nodes
     set node to contents of nodeRef
-    if my optionalAttribute(node, "AXIdentifier") is expectedID then
-      set descendants to {node}
-      tell application "System Events"
-        if my optionalAttribute(node, "AXRole") is not "AXCheckBox" then set descendants to descendants & (entire contents of node)
-      end tell
-      repeat with childRef in descendants
-        set childNode to contents of childRef
-        if my optionalAttribute(childNode, "AXRole") is "AXCheckBox" then
-          if matches does not contain childNode then set end of matches to childNode
-        end if
-      end repeat
+    if my optionalAttribute(node, "AXRole") is "AXCheckBox" then
+      if my optionalAttribute(node, "AXIdentifier") is expectedID then
+        set matchCount to matchCount + 1
+        set matchedNode to node
+      end if
     end if
   end repeat
-  if (count of matches) is not 1 then error "Expected one actual checkbox for " & expectedID & ", found " & (count of matches)
-  return item 1 of matches
+  if matchCount is not 1 then error "Expected one actual checkbox for " & expectedID & ", found " & matchCount
+  return matchedNode
 end findCheckbox
 on run argv
   local nodes, expectedID, expectedValue, target, beforeValue, afterValue
