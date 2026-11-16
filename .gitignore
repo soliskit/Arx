@@ -15,3 +15,16 @@ playground.xcworkspace
 
 # Swift Package Manager and local builds
 .build/
+
+# Local tools and generated qualification output
+node_modules/
+browser-evidence/
+arx-mac-*.png
+settings-*.json
+navigation-accessibility.txt
+navigation-elements.txt
+fixture-app.log
+effective-entitlements.plist
+*.xcresult/
+.DS_Store
+.tools/
