@@ -1,4 +1,11 @@
 // swift-tools-version: 6.2
+//
+//  Package.swift
+//  Arx
+//
+//  Created by David Solis on 11/15/26.
+//
+
 import PackageDescription
 
 let package = Package(

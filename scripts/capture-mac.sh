@@ -3,9 +3,9 @@ set -euo pipefail
 if [[ "${CI:-}" == true && "${ARX_FIXTURE_DISPLAY_READY:-}" != 1 ]]; then
   exec swift scripts/fixture-display.swift "$0"
 fi
-APP="$PWD/.build/Build/Products/Debug/Arx.app"
-[ -d "$APP" ] || { echo "Built app not found"; exit 1; }
-"$APP/Contents/MacOS/Arx" --bridge-fixtures >fixture-app.log 2>&1 &
+APP="${PWD}/.build/Build/Products/Debug/Arx.app"
+[[ -d "${APP}" ]] || { echo "Built app not found"; exit 1; }
+"${APP}/Contents/MacOS/Arx" --bridge-fixtures >fixture-app.log 2>&1 &
 PID=$!
 diagnostics() {
   osascript -e 'tell application "System Events" to tell process "Arx" to get entire contents of window 1' > navigation-accessibility.txt 2>&1 || true
@@ -16,22 +16,22 @@ diagnostics() {
     IFS=', ' read -r x y w h <<< "${current}"
     if [[ -n "${h:-}" ]]; then screencapture -x -R"${x},${y},${w},${h}" arx-mac-failure.png || true; fi
   fi
-  kill "$PID" 2>/dev/null || true
+  kill "${PID}" 2>/dev/null || true
 }
 trap diagnostics EXIT
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
   BOUNDS=$(osascript -e 'tell application "System Events" to tell process "Arx" to get (position of window 1) & (size of window 1)' 2>/dev/null || true)
-  [ -n "$BOUNDS" ] && break
+  [[ -n "${BOUNDS}" ]] && break
   sleep 1
 done
-[ -n "$BOUNDS" ] || { echo "No app window"; exit 1; }
+[[ -n "${BOUNDS}" ]] || { echo "No app window"; exit 1; }
 capture() {
   local b x y w h
   b=$(osascript -e 'tell application "System Events" to tell process "Arx" to get (position of window 1) & (size of window 1)')
-  IFS=', ' read -r x y w h <<< "$b"
-  echo "$1: $w x $h"
-  [ "$w" -ge 680 ] && [ "$h" -ge 420 ]
-  screencapture -x -R"$x,$y,$w,$h" "arx-mac-$1.png"
+  IFS=', ' read -r x y w h <<< "${b}"
+  echo "$1: ${w} x ${h}"
+  [[ "${w}" -ge 680 ]] && [[ "${h}" -ge 420 ]]
+  screencapture -x -R"${x},${y},${w},${h}" "arx-mac-$1.png"
 }
 resize() {
   local actual aw ah attempt
@@ -154,13 +154,13 @@ check() {
     *) echo "Unknown fixture"; exit 1 ;;
   esac
   before=${!key}
-  native click "$1" "$before"
-  printf -v "$key" '%s' "$((1 - before))"
+  native click "$1" "${before}"
+  printf -v "${key}" '%s' "$((1 - before))"
 }
 verify_all() {
-  native verify inbox "$INBOX"
-  native verify weekend "$WEEKEND"
-  native verify later "$LATER"
+  native verify inbox "${INBOX}"
+  native verify weekend "${WEEKEND}"
+  native verify later "${LATER}"
 }
 sidebar() { osascript -e 'tell application "System Events" to tell process "Arx" to click button 1 of toolbar 1 of window 1'; sleep 1; }
 resize 1200 650

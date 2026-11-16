@@ -1,3 +1,10 @@
+//
+//  BridgeViewModel.swift
+//  Arx
+//
+//  Created by David Solis on 11/15/26.
+//
+
 import BridgeCore
 import EventKit
 import Foundation

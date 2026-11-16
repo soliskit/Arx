@@ -24,14 +24,21 @@ Open `Arx.xcodeproj`, select the Mac scheme, and build/run on a supported Mac. C
 
 Hummingbird is pinned to 2.28.1 in `Package.swift`; commit the resolved graph. macOS uses system CryptoKit. Linux fixture qualification references the same resolved swift-crypto 5.1.1 package.
 
-Install and verify the existing hooks in each checkout:
+Node 26.13.0 is used only for development checks and browser tests. The Mac app runs a Swift/Hummingbird server that serves its bundled HTML, CSS and JavaScript; it does not need a Node server or separately hosted website.
+
+Install the pinned checks and hooks in each checkout:
 
 ```sh
+npm ci --ignore-scripts
+bash scripts/install-linters.sh
 swift package --disable-sandbox lefthook install
 swift package --disable-sandbox lefthook validate
+npm run lint
 swift format lint --strict --recursive BridgeCore BridgeCoreTests BridgeFixtureServer Arx ArxTests ArxUITests Package.swift
 swift test
 ```
+
+The shell installer verifies pinned release hashes and keeps ShellCheck/actionlint in the ignored `.tools/bin` directory. No system install is needed. Hooks and the existing CI build job check authored browser files, scripts and workflow with the same rules. Dependencies, generated proof output and Xcode-managed files are excluded.
 
 The fixture app mode is explicit and never constructs the EventKit adapter:
 

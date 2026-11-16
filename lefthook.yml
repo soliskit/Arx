@@ -4,3 +4,5 @@ pre-commit:
     swift-style:
       glob: "**/*.swift"
       run: swift format lint --strict -- {staged_files}
+    non-swift:
+      run: npm run lint

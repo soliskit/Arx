@@ -55,6 +55,14 @@ jobs:
                   assert settings.get('MACOSX_DEPLOYMENT_TARGET') == '27.2', f'{target}/{config}: project minimum changed'
                   print(target, config, 'SUPPORTED_PLATFORMS=' + settings['SUPPORTED_PLATFORMS'], 'SDKROOT=' + settings.get('SDKROOT', ''))
           PYTHON
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+      - name: Check all authored non-Swift files
+        run: |
+          npm ci --ignore-scripts
+          bash scripts/install-linters.sh
+          npm run lint
       - name: Lint the Swift sources
         run: swift format lint --strict --recursive BridgeCore BridgeCoreTests BridgeFixtureServer Arx ArxTests ArxUITests Package.swift scripts/fixture-display.swift
       - name: Run bridge package tests
@@ -138,12 +146,13 @@ jobs:
           echo "$RUNNER_TEMP/swift-6.4.1-RELEASE-ubuntu22.04/usr/bin" >> "$GITHUB_PATH"
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version-file: package.json
       - name: Build fixture server
         run: swift build --product BridgeFixtureServer --jobs 2
       - name: Locate browser and run HTTPS fixture proof
         run: |
-          export CHROME_PATH="$(command -v google-chrome || command -v chromium)"
+          CHROME_PATH="$(command -v google-chrome || command -v chromium)"
+          export CHROME_PATH
           test -n "$CHROME_PATH"
           node scripts/browser-proof.mjs .build/debug/BridgeFixtureServer browser-evidence
       - uses: actions/upload-artifact@v4
