@@ -6,6 +6,12 @@ APP="$PWD/.build/Build/Products/Debug/Arx.app"
 PID=$!
 diagnostics() {
   osascript -e 'tell application "System Events" to tell process "Arx" to get entire contents of window 1' > navigation-accessibility.txt 2>&1 || true
+  if [[ -n "${BOUNDS:-}" ]]; then
+    local x y w h current
+    current=$(osascript -e 'tell application "System Events" to tell process "Arx" to get (position of window 1) & (size of window 1)' 2>/dev/null || true)
+    IFS=', ' read -r x y w h <<< "${current}"
+    if [[ -n "${h:-}" ]]; then screencapture -x -R"${x},${y},${w},${h}" arx-mac-failure.png || true; fi
+  fi
   kill "$PID" 2>/dev/null || true
 }
 trap diagnostics EXIT
@@ -23,7 +29,18 @@ capture() {
   [ "$w" -ge 680 ] && [ "$h" -ge 420 ]
   screencapture -x -R"$x,$y,$w,$h" "arx-mac-$1.png"
 }
-resize() { osascript -e "tell application \"System Events\" to tell process \"Arx\" to set size of window 1 to {$1, $2}"; sleep 1; }
+resize() {
+  local actual aw ah
+  osascript -e "tell application \"System Events\" to tell process \"Arx\" to set size of window 1 to {$1, $2}"
+  sleep 1
+  actual=$(osascript -e 'tell application "System Events" to tell process "Arx" to get size of window 1')
+  IFS=', ' read -r aw ah <<< "${actual}"
+  if [[ "$1" -lt 680 || "$2" -lt 420 ]]; then
+    [[ "${aw}" -ge 680 && "${ah}" -ge 420 ]] || { echo "Minimum window too small: ${actual}"; exit 1; }
+  else
+    [[ "${aw}" -eq "$1" && "${ah}" -eq "$2" ]] || { echo "Resize mismatch: requested $1 x $2, actual ${actual}"; exit 1; }
+  fi
+}
 check() {
   osascript - "$1" <<'APPLESCRIPT'
 on run argv
@@ -31,13 +48,15 @@ on run argv
     set frontmost to true
     repeat with candidate in entire contents of window 1
       try
-        if role of candidate is "AXCheckBox" then
-          set expectedID to "list-grant-" & (item 1 of argv)
-          if value of attribute "AXIdentifier" of candidate is expectedID then
+        set expectedID to "list-grant-" & (item 1 of argv)
+        if value of attribute "AXIdentifier" of candidate is expectedID then
+          if role of candidate is "AXCheckBox" then
             click candidate
-            delay 0.3
-            return
+          else
+            click checkbox 1 of candidate
           end if
+          delay 0.3
+          return
         end if
       end try
     end repeat

@@ -66,7 +66,8 @@ public struct BridgeServer: Sendable {
   }
   private func handle(_ request: Request) async -> Response {
     do {
-      guard header("Host", request)?.lowercased() == configuration.host,
+      guard request.head.authority?.lowercased() == configuration.host,
+        header("Host", request) == nil,
         header("X-Forwarded-Proto", request) == "https",
         request.uri.query == nil
       else { throw BridgeFailure.denied }

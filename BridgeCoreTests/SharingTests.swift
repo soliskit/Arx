@@ -208,7 +208,7 @@ import Testing
       .init(frequency: "weekly", interval: 2, daysOfWeek: [.init(day: 2, week: 0)], count: 4)
     ]
     item = try #require(
-      c.mutate(
+      try c.mutate(
         token, csrf: csrf,
         command: .init(
           action: .edit, listID: item.listID, itemID: item.id, base: item, fields: fields)))
@@ -218,20 +218,20 @@ import Testing
     fields.alarms = []
     fields.repeats = []
     item = try #require(
-      c.mutate(
+      try c.mutate(
         token, csrf: csrf,
         command: .init(
           action: .edit, listID: item.listID, itemID: item.id, base: item, fields: fields)))
     #expect(item.fields == fields)
     for action in [Mutation.Action.complete, .reopen] {
       item = try #require(
-        c.mutate(
+        try c.mutate(
           token, csrf: csrf,
           command: .init(action: action, listID: item.listID, itemID: item.id, base: item)))
       #expect(item.fields.completed == (action == .complete))
     }
     item = try #require(
-      c.mutate(
+      try c.mutate(
         token, csrf: csrf,
         command: .init(
           action: .move, listID: item.listID, itemID: item.id, base: item, destination: "weekend")))
@@ -251,7 +251,7 @@ import Testing
     var fields = base.fields
     fields.notes = "Only notes changed"
     let result = try #require(
-      c.mutate(
+      try c.mutate(
         token, csrf: csrf,
         command: .init(action: .edit, listID: "inbox", itemID: "book", base: base, fields: fields)))
     #expect(result.fields.repeats == base.fields.repeats)
@@ -341,7 +341,7 @@ import Testing
   @Test func replayAfterExternalMoveDoesNotDiscloseUnsharedContent() throws {
     let (store, c, token, csrf) = try setup(lists: ["inbox"])
     let command = Mutation(action: .create, listID: "inbox", fields: .init(title: "Replay fixture"))
-    let created = try #require(c.mutate(token, csrf: csrf, command: command))
+    let created = try #require(try c.mutate(token, csrf: csrf, command: command))
     store.rows[created.id]!.listID = "weekend"
     #expect(throws: BridgeFailure.denied) { try c.mutate(token, csrf: csrf, command: command) }
   }
