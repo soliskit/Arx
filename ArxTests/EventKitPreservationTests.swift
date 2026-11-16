@@ -61,4 +61,40 @@ import Testing
     try adapter.apply(fields, to: reminder, preserving: base)
     #expect(reminder.alarms?.first?.relativeOffset == -900)
   }
+
+  @Test func notesEditPreservesExistingCompletionDate() throws {
+    let adapter = EventKitStore()
+    let reminder = EKReminder(eventStore: EKEventStore())
+    reminder.title = "Completed fixture"
+    let completedAt = Date(timeIntervalSince1970: 1_800_000_000)
+    reminder.completionDate = completedAt
+    try #require(reminder.isCompleted)
+    try #require(reminder.completionDate == completedAt)
+    var fields = ReminderFields(title: "Completed fixture")
+    fields.completed = true
+    let base = SharedReminder(id: "fixture", listID: "fixture", fields: fields)
+    fields.notes = "Only notes changed"
+    try adapter.apply(fields, to: reminder, preserving: base)
+    #expect(reminder.notes == "Only notes changed")
+    #expect(reminder.isCompleted)
+    #expect(reminder.completionDate == completedAt)
+  }
+
+  @Test func invalidStoredURLRejectsCompletionBeforeChangingObject() throws {
+    let adapter = EventKitStore()
+    let reminder = EKReminder(eventStore: EKEventStore())
+    reminder.title = "URL fixture"
+    reminder.url = URL(string: "mailto:fixture@example.com")
+    var fields = ReminderFields(title: "URL fixture")
+    fields.url = reminder.url?.absoluteString
+    let base = SharedReminder(id: "fixture", listID: "fixture", fields: fields)
+    fields.completed = true
+    #expect(throws: BridgeFailure.invalid) {
+      try adapter.apply(fields, to: reminder, preserving: base)
+    }
+    #expect(!reminder.isCompleted)
+    #expect(reminder.completionDate == nil)
+    #expect(reminder.url?.absoluteString == "mailto:fixture@example.com")
+  }
+
 }

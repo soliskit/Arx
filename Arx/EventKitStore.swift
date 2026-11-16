@@ -44,29 +44,29 @@ import Foundation
     let destination = try writable(list)
     let item = EKReminder(eventStore: store)
     item.calendar = destination
+    try apply(fields, to: item, preserving: nil)
     do {
-      try apply(fields, to: item, preserving: nil)
       try store.save(item, commit: true)
     } catch {
       item.reset()
       throw BridgeFailure.ambiguous
     }
-    return try current(item.calendarItemIdentifier)
+    return snapshot(item)
   }
   func save(_ updated: SharedReminder, replacing base: SharedReminder) throws -> SharedReminder {
     let item = try object(base.id)
     guard snapshot(item) == base else { throw BridgeFailure.conflict }
     _ = try writable(base.listID)
     let destination = try writable(updated.listID)
+    try apply(updated.fields, to: item, preserving: base)
     do {
-      try apply(updated.fields, to: item, preserving: base)
       item.calendar = destination
       try store.save(item, commit: true)
     } catch {
       item.reset()
       throw BridgeFailure.ambiguous
     }
-    return try current(item.calendarItemIdentifier)
+    return snapshot(item)
   }
   func remove(_ reminder: SharedReminder) throws {
     let item = try object(reminder.id)
@@ -222,6 +222,6 @@ import Foundation
     r.priority = f.priority
     if f.start != base?.fields.start { r.startDateComponents = components(f.start) }
     if f.due != base?.fields.due { r.dueDateComponents = components(f.due) }
-    r.isCompleted = f.completed
+    if r.isCompleted != f.completed { r.isCompleted = f.completed }
   }
 }
