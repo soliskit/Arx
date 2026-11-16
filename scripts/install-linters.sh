@@ -30,9 +30,9 @@ esac
 curl --fail --location --retry 2 -o "${TEMP}/shellcheck.tar.gz" "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.${SHELL_ARCH}.tar.gz"
 curl --fail --location --retry 2 -o "${TEMP}/actionlint.tar.gz" "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_${ACTION_ARCH}.tar.gz"
 if command -v sha256sum >/dev/null; then
-  printf '%s  %s\n' "${SHELL_HASH}" "${TEMP}/shellcheck.tar.gz" "${ACTION_HASH}" "${TEMP}/actionlint.tar.gz" | sha256sum --check
+  printf '%s  %s\n' "${SHELL_HASH}" "${TEMP}/shellcheck.tar.gz" "${ACTION_HASH}" "${TEMP}/actionlint.tar.gz" | sha256sum -c
 else
-  printf '%s  %s\n' "${SHELL_HASH}" "${TEMP}/shellcheck.tar.gz" "${ACTION_HASH}" "${TEMP}/actionlint.tar.gz" | shasum -a 256 --check
+  printf '%s  %s\n' "${SHELL_HASH}" "${TEMP}/shellcheck.tar.gz" "${ACTION_HASH}" "${TEMP}/actionlint.tar.gz" | shasum -a 256 -c
 fi
 tar -xzf "${TEMP}/shellcheck.tar.gz" -C "${TEMP}"
 tar -xzf "${TEMP}/actionlint.tar.gz" -C "${TEMP}"

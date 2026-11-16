@@ -28,7 +28,7 @@ struct HTTPTests {
     // .live actually binds and sends HTTP, not just a direct router dispatch.
     try await app.test(.live) { live in
       guard let port = live.port else { throw BridgeFailure.unavailable }
-      try await TestClient.withClient(host: "127.0.0.1", port: port) { connection in
+      try await TestClient.withClient(host: "localhost", port: port) { connection in
         let client = WireFixture(connection: connection)
         var headers = HTTPFields()
         headers[HTTPField.Name("Host")!] = "bridge.example.com"
