@@ -1,0 +1,118 @@
+name: Inspect section interface types
+
+on:
+  pull_request:
+    types: [opened]
+    branches: [main]
+    paths: [.github/workflows/sections-interface-schema.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.head_ref == 'maintenance/sections-interface-schema'
+    runs-on: xcode-27
+    timeout-minutes: 5
+    steps:
+      - name: Inspect method metadata without opening a store
+        run: |
+          set -euo pipefail
+          sw_vers
+          uname -m
+          xcodebuild -version
+          xcrun clang --version
+          PROBE_DIR="$(mktemp -d "${RUNNER_TEMP}/section-schema.XXXXXX")"
+          trap 'rm -rf "${PROBE_DIR}"' EXIT
+          cat > "${PROBE_DIR}/probe.m" <<'OBJC'
+          #import <Foundation/Foundation.h>
+          #include <ctype.h>
+          #include <dlfcn.h>
+          #include <objc/runtime.h>
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+
+          struct Check { const char *className; const char *selectorName; };
+
+          static const char *text(const char *value) { return value ? value : ""; }
+
+          static int matches(const char *name) {
+            const char *terms[] = {"identifier", "objectid", "remobject", "parent", "list", "section", "reminder", "storage", "persistent"};
+            for (size_t t = 0; t < sizeof(terms) / sizeof(terms[0]); t++) {
+              for (const char *start = name; *start; start++) {
+                size_t i = 0;
+                while (start[i] && terms[t][i] && tolower((unsigned char)start[i]) == terms[t][i]) { i++; }
+                if (!terms[t][i]) return 1;
+              }
+            }
+            return 0;
+          }
+
+          static void schema(const char *name) {
+            Class cls = objc_getClass(name);
+            printf("schema_class=%s class_present=%s superclass=%s\n", name, cls ? "true" : "false", cls ? text(class_getName(class_getSuperclass(cls))) : "");
+            if (!cls) return;
+            unsigned count = 0, matched = 0, emitted = 0;
+            Method *methods = class_copyMethodList(cls, &count);
+            for (unsigned i = 0; i < count; i++) {
+              const char *selector = sel_getName(method_getName(methods[i]));
+              if (!matches(selector)) continue;
+              matched++;
+              if (emitted >= 80) continue;
+              printf("schema_class=%s method=%s types=%s\n", name, selector, text(method_getTypeEncoding(methods[i])));
+              emitted++;
+            }
+            free(methods);
+            printf("schema_class=%s methods_matched=%u methods_emitted=%u methods_truncated=%s\n", name, matched, emitted, matched > emitted ? "true" : "false");
+            matched = emitted = count = 0;
+            objc_property_t *properties = class_copyPropertyList(cls, &count);
+            for (unsigned i = 0; i < count; i++) {
+              const char *property = property_getName(properties[i]);
+              if (!matches(property)) continue;
+              matched++;
+              if (emitted >= 40) continue;
+              printf("schema_class=%s property=%s attributes=%s\n", name, property, text(property_getAttributes(properties[i])));
+              emitted++;
+            }
+            free(properties);
+            printf("schema_class=%s properties_matched=%u properties_emitted=%u properties_truncated=%s\n", name, matched, emitted, matched > emitted ? "true" : "false");
+          }
+
+          int main(void) {
+            @autoreleasepool {
+              void *eventkit = dlopen("/System/Library/Frameworks/EventKit.framework/EventKit", RTLD_LAZY | RTLD_LOCAL);
+              void *reminderkit = dlopen("/System/Library/PrivateFrameworks/ReminderKit.framework/ReminderKit", RTLD_LAZY | RTLD_LOCAL);
+              printf("eventkit_present=%s reminderkit_present=%s\n", eventkit ? "true" : "false", reminderkit ? "true" : "false");
+              const struct Check checks[] = {
+                {"REMStore", "initUserInteractive:"},
+                {"REMStore", "fetchListSectionsWithListObjectID:error:"},
+                {"REMStore", "fetchListWithObjectID:error:"},
+                {"REMStore", "fetchReminderWithObjectID:error:"},
+                {"REMListSectionsDataView", "initWithStore:"},
+                {"REMListSectionsDataView", "fetchListSectionWithReminderID:error:"},
+                {"REMSaveRequest", "initWithStore:"},
+                {"REMSaveRequest", "updateList:"},
+                {"REMSaveRequest", "updateListSection:"},
+                {"REMSaveRequest", "addListSectionWithDisplayName:toListSectionContextChangeItem:"},
+                {"REMSaveRequest", "saveSynchronouslyWithError:"},
+                {"REMListChangeItem", "sectionsContextChangeItem"},
+                {"REMListSectionChangeItem", "setDisplayName:"},
+                {"REMListSectionContextChangeItem", "setUnsavedMembershipsOfRemindersInSections:"},
+                {"REMMembership", "initWithMemberIdentifier:groupIdentifier:isObsolete:modifiedOn:"},
+                {"REMMemberships", "initWithMembershipByMemberIdentifier:"}
+              };
+              for (size_t i = 0; i < sizeof(checks) / sizeof(checks[0]); i++) {
+                Class cls = objc_getClass(checks[i].className);
+                Method method = cls ? class_getInstanceMethod(cls, sel_registerName(checks[i].selectorName)) : NULL;
+                printf("class=%s class_present=%s selector=%s selector_present=%s types=%s\n", checks[i].className, cls ? "true" : "false", checks[i].selectorName, method ? "true" : "false", method ? text(method_getTypeEncoding(method)) : "");
+              }
+              const char *classes[] = {"EKCalendar", "EKCalendarItem", "EKReminder", "REMList", "REMReminder", "REMListSection"};
+              for (size_t i = 0; i < sizeof(classes) / sizeof(classes[0]); i++) schema(classes[i]);
+              printf("store_constructed=false data_requested=false save_called=false\n");
+            }
+            return 0;
+          }
+          OBJC
+          xcrun clang -fobjc-arc -Wall -Wextra -Werror -framework Foundation "${PROBE_DIR}/probe.m" -o "${PROBE_DIR}/probe"
+          "${PROBE_DIR}/probe"
