@@ -171,7 +171,10 @@ public struct BridgeServer: Sendable {
     let body = try await request.body.collect(upTo: 65_536)
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
-    return try decoder.decode(T.self, from: Data(body.readableBytesView))
+    // A body that does not parse is a bad request, not a lost session.
+    do { return try decoder.decode(T.self, from: Data(body.readableBytesView)) } catch {
+      throw BridgeFailure.invalid
+    }
   }
   private func json<T: Encodable>(_ value: T, status: HTTPResponse.Status = .ok) throws -> Response
   {

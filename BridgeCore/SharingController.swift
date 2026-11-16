@@ -35,7 +35,10 @@ import Foundation
     self.store = store
     self.clock = clock
   }
-  public var clientInfo: [ClientInfo] { clients.values.map(\.info).sorted { $0.label < $1.label } }
+  public var clientInfo: [ClientInfo] {
+    prune()
+    return clients.values.map(\.info).sorted { $0.label < $1.label }
+  }
   public func start() throws {
     guard !running, store.authorized else { throw BridgeFailure.unavailable }
     running = true
@@ -54,6 +57,7 @@ import Foundation
     return try store.lists()
   }
   public func pairClient(label: String, rights: ClientRights) throws -> (UUID, String) {
+    prune()
     guard running, clients.count < 20, !label.isEmpty, label.count <= 80,
       rights.lists.isSubset(of: Set(try inventory().map(\.id)))
     else { throw BridgeFailure.invalid }
@@ -71,12 +75,13 @@ import Foundation
     }
     let now = clock()
     failedPairings.removeAll { now.timeIntervalSince($0) > 60 }
-    guard failedPairings.count < 10 else { throw BridgeFailure.rateLimited }
+    // A correct secret is never refused because strangers guessed wrongly first.
     guard secret.utf8.count <= 128,
       let id = clients.first(where: {
         $0.value.pairingHash == Self.digest(secret) && $0.value.pairingExpiry > now
       })?.key, var client = clients[id]
     else {
+      guard failedPairings.count < 10 else { throw BridgeFailure.rateLimited }
       failedPairings.append(now)
       throw BridgeFailure.denied
     }
@@ -90,6 +95,15 @@ import Foundation
     client.info.paired = true
     clients[id] = client
     return (token, csrf)
+  }
+  /// Drops pairings that expired unused and sessions past their idle or absolute limit.
+  private func prune() {
+    let now = clock()
+    clients = clients.filter { _, client in
+      guard client.info.paired else { return client.pairingExpiry > now }
+      guard let issued = client.issued, let seen = client.lastSeen else { return false }
+      return now.timeIntervalSince(issued) < 86_400 && now.timeIntervalSince(seen) < 1800
+    }
   }
   private func session(_ token: String, csrf: String? = nil) throws -> UUID {
     guard running, store.authorized else {
