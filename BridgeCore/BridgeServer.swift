@@ -49,7 +49,11 @@ public struct BridgeServer: Sendable {
     try await application(onRunning: onRunning).runService()
   }
   private struct PairRequest: Decodable { var secret: String }
-  private struct ReadRequest: Decodable { var listID: String }
+  private struct ReadRequest: Decodable {
+    var listID: String
+    var after: String?
+    var before: String?
+  }
   private struct SessionResponse: Encodable {
     var rights: ClientRights
     var csrf: String
@@ -115,7 +119,9 @@ public struct BridgeServer: Sendable {
         guard header("X-CSRF-Token", request) == (try await sharing.sessionState(token)).csrf else {
           throw BridgeFailure.denied
         }
-        return try json(try await sharing.read(token, list: input.listID))
+        return try json(
+          try await sharing.read(
+            token, list: input.listID, after: input.after, before: input.before))
       }
       if path == "/api/mutate" {
         let command: Mutation = try await decode(request)
@@ -141,7 +147,7 @@ public struct BridgeServer: Sendable {
           "Result uncertain. Refresh and check Reminders. Do not repeat this operation blindly."
       case BridgeFailure.rateLimited:
         status = .tooManyRequests
-        message = "Pairing temporarily limited. Try later."
+        message = "Requests temporarily limited. Try later."
       case BridgeFailure.unavailable:
         status = .serviceUnavailable
         message = "The store or bridge is unavailable."

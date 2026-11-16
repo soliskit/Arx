@@ -8,13 +8,22 @@ import Foundation
     let origin = CommandLine.arguments[1]
     let directory = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true)
     let port = Int(CommandLine.arguments[3]) ?? 0
-    let controller = SharingController(store: FixtureStore())
+    let store = FixtureStore()
+    // A separate selected fixture list exercises browser pagination without
+    // changing the small CRUD examples or touching real EventKit data.
+    store.collections.append(.init(id: "pages", title: "Paged fixture"))
+    for index in 0..<105 {
+      let id = String(format: "page-%03d", index)
+      store.rows[id] = SharedReminder(
+        id: id, listID: "pages", fields: .init(title: "Page fixture \(index)"))
+    }
+    let controller = SharingController(store: store)
     try controller.start()
     var rights = ClientRights()
     rights.read = true
     rights.manage = true
     rights.delete = true
-    rights.lists = ["inbox", "weekend"]
+    rights.lists = ["inbox", "weekend", "pages"]
     let (_, secret) = try controller.pairClient(label: "Browser fixture", rights: rights)
     let server = BridgeServer(
       sharing: controller, configuration: try .init(origin: origin, port: port))

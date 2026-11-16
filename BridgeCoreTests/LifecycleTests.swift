@@ -12,8 +12,8 @@ import Testing
   let fixture = FixtureStore()
   var authorized: Bool { fixture.authorized }
   func lists() throws -> [ReminderList] { try fixture.lists() }
-  func reminders(in list: String) async throws -> [SharedReminder] {
-    try await fixture.reminders(in: list)
+  func reminderIDs(in list: String) async throws -> [String] {
+    try await fixture.reminderIDs(in: list)
   }
   func current(_ id: String) throws -> SharedReminder { try fixture.current(id) }
   func create(in list: String, fields: ReminderFields) throws -> SharedReminder {

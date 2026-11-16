@@ -2,25 +2,19 @@
 
 A Mac control panel for sharing selected Apple Reminders lists and actions with a paired browser. The HTML, CSS and JavaScript are bundled with the app. There is no separate hosted frontend.
 
-## Verification status
+## Status and boundaries
 
-This implementation needs automated qualification and separate acceptance on an owner's Mac and actual remote connection. Fixture checks do not prove provider-specific behavior, alarm delivery or real-account operation. Building the source in Xcode is the installation route; this is not a signed/notarized installer or App Store release.
+Automated qualification and acceptance on the owner's Mac and remote connection are still pending. Install by building in Xcode; no signed installer or App Store release is provided.
 
-## Security boundaries
+Apple grants full Reminders access. Arx's server enforces the selected-list and action grants. Each client starts with no grants; revoke and pair again to change an existing client's access. Moves need both lists granted and writable. Deletion needs its own grant and exact-title confirmation.
 
-Apple grants full Reminders access. Arx enforces narrower list and action grants in its server. Selecting a list in the native sidebar is not a macOS-enforced per-list permission. A serious app flaw could bypass that narrower boundary.
+Reads show up to 100 reminders per page, with Previous/Next controls and no total list-size cap. EventKit fetches the selected list natively because it has no paged API; Arx retains identifiers and converts only one page to response snapshots. At most four reads run concurrently, one per client. Every page rechecks the session, grant and current list membership. External changes can shift pages; Refresh restarts from the beginning.
 
-A read fetch currently rejects lists with more than 5,000 reminders after fetching them. It does not truncate or claim a complete result. This limit needs review for larger lists.
+The listener binds to `127.0.0.1`. The HTTPS connector makes it remotely reachable; pairing authenticates clients. Cloudflare can process the proxied reminder traffic. An optional Cloudflare Access login is not configured by Arx. Verify the connector and authentication before enabling remote access.
 
-Each client has independent list, read, change and deletion grants. New grants start empty. Browsing/highlighting a list does not grant access. Changing the form affects only the next client: revoke and pair again to change an existing grant. Moves require both lists to be granted and writable. Deletion requires its own grant and exact-title confirmation.
+Pairing secrets are single-use and expire after two minutes. Enter them privately in the browser, never a URL, chat, log or screenshot. Cookies are Secure, HttpOnly and SameSite=Strict. Sessions expire after 24 hours or 30 idle minutes; background checks count as activity. Stop or restart clears all grants and sessions. Revocation blocks new requests, not copies already seen or changes already saved.
 
-The HTTP listener binds only to `127.0.0.1`. It expects the configured HTTPS hostname and forwarded HTTPS protocol. These checks are not authentication for other software already running on the Mac. A configured connector makes the service remotely reachable; it does not by itself provide visitor authentication.
-
-Pairing uses a single-use random secret with a two-minute lifetime. Enter it privately into the browser, never a URL, chat, log or screenshot. Session cookies are Secure, HttpOnly and SameSite=Strict. Sessions have a 24-hour maximum and 30-minute idle timeout; background browser checks count as activity. All grants and sessions are held in memory and disappear on restart or stop. Revocation blocks new requests but cannot erase previously viewed data or undo a saved operation.
-
-Cloudflare handles and can process proxied reminder traffic. This is not encryption that hides the data from Cloudflare. Account settings, caching and any additional identity gateway need separate verification. Cloudflare Access is an optional outer login layer, not enabled by this app. Keep the app unpublished until its authentication, permissions and actual connector configuration are checked. Keep macOS, the app and connector updated.
-
-The app does not request Calendar events, Mail or Messages access, install a login service, prevent sleep or manage Reminders lists. Tags, subtasks, attachments, assignments and Smart Lists are not promised through undocumented interfaces. Email and file/URL-opening alarm actions are excluded.
+The app requests Reminders only. It does not manage lists, install a service or prevent sleep. Tags, subtasks, attachments, assignments and Smart Lists are outside the supported interface. Email and file/URL-opening alarm actions are excluded.
 
 ## Build and local checks
 
@@ -67,11 +61,11 @@ Check unshared identifiers, read-only lists, grant removal/revocation, refresh a
 
 ## Conflicts and uncertain results
 
-Before saving, Arx compares the client's displayed original values with a fresh store snapshot. A detected mismatch requires refresh and review. EventKit has no atomic compare-and-swap for these saves: iCloud or another app can still change an item after comparison. This is best-effort conflict detection, not a guarantee against every external race.
+Before saving, Arx compares the client's displayed original values with a fresh store snapshot. A detected mismatch requires refresh and review. EventKit has no atomic compare-and-swap for these saves: iCloud or another app can still change an item after comparison. Review changes in Reminders when a concurrent edit is possible.
 
 Missing/stale identifiers fail closed. The app never reconnects an old grant or pending edit by a matching name. Unchanged unsupported recurrence/alarm state is preserved rather than silently simplified. Unsupported edits fail with an error.
 
-Mutation operation IDs limit duplicate application within a session. Do not blindly repeat an uncertain create/delete with a new ID. Refresh and inspect the actual result in Reminders first. Provider-specific save behavior is not assumed successful merely because a request was sent.
+Mutation operation IDs limit duplicate application within a session. Do not blindly repeat an uncertain create/delete with a new ID. Refresh and inspect the actual result in Reminders first.
 
 ## Stop and revoke
 

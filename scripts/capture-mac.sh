@@ -4,7 +4,11 @@ APP="$PWD/.build/Build/Products/Debug/Arx.app"
 [ -d "$APP" ] || { echo "Built app not found"; exit 1; }
 "$APP/Contents/MacOS/Arx" --bridge-fixtures >fixture-app.log 2>&1 &
 PID=$!
-trap 'kill "$PID" 2>/dev/null || true' EXIT
+diagnostics() {
+  osascript -e 'tell application "System Events" to tell process "Arx" to get entire contents of window 1' > navigation-accessibility.txt 2>&1 || true
+  kill "$PID" 2>/dev/null || true
+}
+trap diagnostics EXIT
 for i in $(seq 1 30); do
   BOUNDS=$(osascript -e 'tell application "System Events" to tell process "Arx" to get (position of window 1) & (size of window 1)' 2>/dev/null || true)
   [ -n "$BOUNDS" ] && break
@@ -27,9 +31,13 @@ on run argv
     set frontmost to true
     repeat with candidate in entire contents of window 1
       try
-        if role of candidate is "AXCheckBox" and name of candidate contains (item 1 of argv) then
-          click candidate
-          return
+        if role of candidate is "AXCheckBox" then
+          set expectedID to "list-grant-" & (item 1 of argv)
+          if value of attribute "AXIdentifier" of candidate is expectedID then
+            click candidate
+            delay 0.3
+            return
+          end if
         end if
       end try
     end repeat
@@ -41,21 +49,21 @@ APPLESCRIPT
 sidebar() { osascript -e 'tell application "System Events" to tell process "Arx" to click button 1 of toolbar 1 of window 1'; sleep 1; }
 resize 1200 650
 capture wide
-check Inbox
+check inbox
 capture wide-selected
-check Weekend
+check weekend
 capture wide-two-lists
-check Later
+check later
 capture wide-empty-list-selected
-check Inbox
+check inbox
 capture wide-list-deselected
 resize 680 650
 capture narrow
-check Inbox
+check inbox
 capture narrow-selected
-check Weekend
+check weekend
 capture narrow-deselected
-check Weekend
+check weekend
 capture narrow-restored
 resize 400 200
 capture minimum
@@ -63,13 +71,13 @@ sidebar
 capture sidebar-hidden
 sidebar
 capture sidebar-restored
-check Weekend
+check weekend
 capture restored-weekend
-check Inbox
+check inbox
 capture restored-inbox
-check Later
+check later
 capture minimum-empty
-check Later
+check later
 capture minimum-selected
 resize 1200 650
 capture wide-return

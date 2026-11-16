@@ -21,7 +21,7 @@ struct HTTPTests {
     // .live actually binds and sends HTTP, not just a direct router dispatch.
     try await app.test(.live) { client in
       var headers = HTTPFields()
-      headers[.host] = "bridge.example.com"
+      headers[HTTPField.Name("Host")!] = "bridge.example.com"
       headers[HTTPField.Name("X-Forwarded-Proto")!] = "https"
       headers[.origin] = "https://bridge.example.com"
       headers[.contentType] = "application/json"
@@ -69,7 +69,7 @@ struct HTTPTests {
         uri: "/api/session?token=forbidden", method: .get, headers: pairHeaders
       ) { response in #expect(response.status == .forbidden) }
       var wrongHost = headers
-      wrongHost[.host] = "attacker.example"
+      wrongHost[HTTPField.Name("Host")!] = "attacker.example"
       try await client.execute(uri: "/", method: .get, headers: wrongHost) { response in
         #expect(response.status == .forbidden)
       }

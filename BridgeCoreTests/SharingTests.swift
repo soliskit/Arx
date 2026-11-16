@@ -88,7 +88,7 @@ import Testing
   @Test func moveOutDuringFetch() async throws {
     let (store, c, token, _) = try setup(lists: ["inbox"])
     store.beforeFetch = { store.rows["book"]!.listID = "weekend" }
-    #expect(try await c.read(token, list: "inbox").isEmpty)
+    #expect(try await c.read(token, list: "inbox").items.isEmpty)
   }
   @Test func removedListFailsClosed() async throws {
     let (store, c, token, _) = try setup()
@@ -96,6 +96,87 @@ import Testing
     store.collections.append(.init(id: "replacement", title: "Inbox"))
     await #expect(throws: BridgeFailure.denied) { try await c.read(token, list: "inbox") }
     await #expect(throws: BridgeFailure.denied) { try await c.read(token, list: "replacement") }
+  }
+  @Test func pagesTraverseMoreThan5000WithoutLossOrDuplicates() async throws {
+    let (store, c, token, _) = try setup(lists: ["inbox"])
+    store.rows.removeAll()
+    for index in 0..<5107 {
+      let id = String(format: "%06d", index)
+      store.rows[id] = SharedReminder(id: id, listID: "inbox", fields: .init(title: id))
+    }
+    var after: String?
+    var seen: [String] = []
+    repeat {
+      let page = try await c.read(token, list: "inbox", after: after)
+      #expect(page.items.count <= 100)
+      seen += page.items.map(\.id)
+      after = page.next
+    } while after != nil
+    #expect(seen.count == 5107)
+    #expect(Set(seen).count == 5107)
+    #expect(seen == seen.sorted())
+    let first = try await c.read(token, list: "inbox")
+    let second = try await c.read(token, list: "inbox", after: first.next)
+    let previous = try await c.read(token, list: "inbox", before: second.previous)
+    #expect(previous.items == first.items)
+    #expect(previous.previous == nil)
+    await #expect(throws: BridgeFailure.denied) {
+      try await c.read(token, list: "weekend", after: first.next)
+    }
+    await #expect(throws: BridgeFailure.invalid) {
+      try await c.read(token, list: "inbox", after: "a", before: "z")
+    }
+    await #expect(throws: BridgeFailure.invalid) {
+      try await c.read(token, list: "inbox", after: String(repeating: "a", count: 8193))
+    }
+    store.beforeFetch = { c.revoke(c.clientInfo[0].id) }
+    await #expect(throws: BridgeFailure.denied) {
+      try await c.read(token, list: "inbox", after: first.next)
+    }
+  }
+  @Test func movedBoundaryDoesNotLeakThroughCursor() async throws {
+    let (store, c, token, _) = try setup(lists: ["inbox"])
+    store.rows.removeAll()
+    for index in 0..<105 {
+      let id = String(format: "private-boundary-%06d", index)
+      store.rows[id] = SharedReminder(id: id, listID: "inbox", fields: .init(title: id))
+    }
+    store.beforeFetch = {
+      for index in 0..<100 {
+        store.rows[String(format: "private-boundary-%06d", index)]!.listID = "weekend"
+      }
+    }
+    let first = try await c.read(token, list: "inbox")
+    #expect(first.items.isEmpty)
+    #expect(first.next != nil)
+    let serialized = String(decoding: try JSONEncoder().encode(first), as: UTF8.self)
+    #expect(!serialized.contains("private-boundary"))
+    store.beforeFetch = nil
+    let next = try await c.read(token, list: "inbox", after: first.next)
+    #expect(next.items.count == 5)
+    #expect(next.next == nil)
+    await #expect(throws: BridgeFailure.invalid) {
+      try await c.read(token, list: "inbox", after: "forged")
+    }
+    var rights = ClientRights()
+    rights.read = true
+    rights.lists = ["inbox"]
+    let (_, secret) = try c.pairClient(label: "Other client", rights: rights)
+    let other = try c.exchange(secret)
+    await #expect(throws: BridgeFailure.invalid) {
+      try await c.read(other.token, list: "inbox", after: first.next)
+    }
+  }
+  @Test func overlappingReadsAreBounded() async throws {
+    let (store, c, token, _) = try setup()
+    store.beforeFetch = {
+      await #expect(throws: BridgeFailure.rateLimited) {
+        try await c.read(token, list: "inbox")
+      }
+    }
+    #expect(try await c.read(token, list: "inbox").items.count == 1)
+    store.beforeFetch = nil
+    #expect(try await c.read(token, list: "inbox").items.count == 1)
   }
   @Test func createAndReplayNoDuplicate() throws {
     let (store, c, token, csrf) = try setup()
@@ -244,7 +325,7 @@ import Testing
   }
   @Test func emptyAndStoreDeniedAreDifferent() async throws {
     let (store, c, token, _) = try setup(lists: ["later"])
-    #expect(try await c.read(token, list: "later").isEmpty)
+    #expect(try await c.read(token, list: "later").items.isEmpty)
     store.authorized = false
     await #expect(throws: BridgeFailure.denied) { try await c.read(token, list: "later") }
   }

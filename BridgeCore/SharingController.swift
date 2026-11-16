@@ -126,18 +126,67 @@ import Foundation
     }
     return c.revision
   }
-  public func read(_ token: String, list: String) async throws -> [SharedReminder] {
+  private var activeReads: Set<UUID> = []
+  private let cursorKey = SymmetricKey(size: .bits256)
+  private struct Cursor: Codable {
+    var client: UUID
+    var list: String
+    var boundary: String
+  }
+  private func openCursor(_ value: String?, client: UUID, list: String) throws -> String? {
+    guard let value else { return nil }
+    guard value.utf8.count <= 8192, let data = Data(base64Encoded: value) else {
+      throw BridgeFailure.invalid
+    }
+    do {
+      let bytes = try AES.GCM.open(AES.GCM.SealedBox(combined: data), using: cursorKey)
+      let cursor = try JSONDecoder().decode(Cursor.self, from: bytes)
+      guard cursor.client == client, cursor.list == list else { throw BridgeFailure.invalid }
+      return cursor.boundary
+    } catch { throw BridgeFailure.invalid }
+  }
+  private func sealCursor(_ boundary: String?, client: UUID, list: String) throws -> String? {
+    guard let boundary else { return nil }
+    let bytes = try JSONEncoder().encode(Cursor(client: client, list: list, boundary: boundary))
+    guard let sealed = try AES.GCM.seal(bytes, using: cursorKey).combined else {
+      throw BridgeFailure.unavailable
+    }
+    return sealed.base64EncodedString()
+  }
+  public func read(_ token: String, list: String, after: String? = nil, before: String? = nil)
+    async throws -> ReminderPage
+  {
     let id = try session(token)
     let revision = try require(id, list: list)
-    let rows = try await store.reminders(in: list)
+    guard after == nil || before == nil else { throw BridgeFailure.invalid }
+    let afterID = try openCursor(after, client: id, list: list)
+    let beforeID = try openCursor(before, client: id, list: list)
+    guard activeReads.count < 4, !activeReads.contains(id) else { throw BridgeFailure.rateLimited }
+    activeReads.insert(id)
+    defer { activeReads.remove(id) }
+    let identifiers = try await store.reminderIDs(in: list)
     _ = try session(token)
     guard try require(id, list: list) == revision else { throw BridgeFailure.denied }
-    guard rows.count <= 5000 else { throw BridgeFailure.unavailable }
+    // EventKit has no paged fetch API. Only identifiers survive its fetch; at
+    // most one page is converted to wire snapshots. Cursors are not grants.
+    let sorted = Set(identifiers).sorted()
+    let candidates = sorted.filter { key in
+      (afterID == nil || key > afterID!) && (beforeID == nil || key < beforeID!)
+    }
+    let page = before == nil ? Array(candidates.prefix(100)) : Array(candidates.suffix(100))
     // Current store membership, not the asynchronous snapshot, is authoritative.
-    return rows.compactMap {
-      guard let item = try? store.current($0.id), item.listID == list else { return nil }
+    let items = page.compactMap { key -> SharedReminder? in
+      guard let item = try? store.current(key), item.listID == list else { return nil }
       return item
     }
+    return ReminderPage(
+      items: items,
+      next: try sealCursor(
+        page.last.flatMap { last in sorted.last.map { $0 > last } == true ? last : nil },
+        client: id, list: list),
+      previous: try sealCursor(
+        page.first.flatMap { first in sorted.first.map { $0 < first } == true ? first : nil },
+        client: id, list: list))
   }
   public func mutate(_ token: String, csrf: String, command: Mutation) throws -> SharedReminder? {
     let id = try session(token, csrf: csrf)

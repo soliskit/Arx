@@ -1,9 +1,9 @@
 'use strict';
 const el=id=>document.getElementById(id);
-let csrf='', rights=null, lists=[], listID='', rows=[], editing=null, busy=false;
+let csrf='', rights=null, lists=[], listID='', rows=[], editing=null, busy=false, nextPage=null, previousPage=null;
 const text=(tag,value)=>{const node=document.createElement(tag);node.textContent=value;return node;};
 function status(value){el('status').textContent=value;}
-function clear(){csrf='';rights=null;lists=[];rows=[];listID='';editing=null;el('workspace').hidden=true;el('editor').hidden=true;el('pairing').hidden=false;el('secret').value='';el('lists').replaceChildren();el('reminders').replaceChildren();}
+function clear(){nextPage=null;previousPage=null;el('pages').hidden=true;csrf='';rights=null;lists=[];rows=[];listID='';editing=null;el('workspace').hidden=true;el('editor').hidden=true;el('pairing').hidden=false;el('secret').value='';el('lists').replaceChildren();el('reminders').replaceChildren();}
 async function api(path,body){
   const options={credentials:'same-origin',cache:'no-store',headers:{}};
   if(body!==undefined){options.method='POST';options.headers={'Content-Type':'application/json','X-CSRF-Token':csrf};options.body=JSON.stringify(body);}
@@ -17,16 +17,16 @@ async function refresh(){
   lists=await api('/api/lists');el('workspace').hidden=false;el('pairing').hidden=true;el('editor').hidden=true;
   el('lists').replaceChildren();
   for(const list of lists){const b=text('button',list.title+(list.writable?'':' (read-only)'));b.type='button';b.className=list.id===listID?'selected':'';b.addEventListener('click',()=>run(async()=>{listID=list.id;await load();}));el('lists').append(b);}
-  if(!lists.some(l=>l.id===listID)){listID='';rows=[];el('reminders').replaceChildren();el('list-title').textContent=lists.length?'Choose a list':'No lists shared';el('new').hidden=true;}
+  if(!lists.some(l=>l.id===listID)){listID='';rows=[];el('reminders').replaceChildren();el('list-title').textContent=lists.length?'Choose a list':'No lists shared';el('new').hidden=true;el('pages').hidden=true;}
   else await load();
   status('Connected. Only your granted lists and actions are shown.');
 }
-async function load(){
-  rows=await api('/api/read',{listID});el('editor').hidden=true;
+async function load(cursor={}){
+  const page=await api('/api/read',{listID,...cursor});rows=page.items;nextPage=page.next;previousPage=page.previous;el('pages').hidden=false;pageControls();el('editor').hidden=true;
   el('list-title').textContent=lists.find(l=>l.id===listID)?.title||'Selected list';
   el('new').hidden=!rights.manage||!lists.find(l=>l.id===listID)?.writable;
   const container=el('reminders');container.replaceChildren();
-  if(!rows.length)container.append(text('p','This list has no reminders.'));
+  if(!rows.length)container.append(text('p',nextPage||previousPage?'No current reminders on this page. Continue or refresh.':'This list has no reminders.'));
   for(const item of rows){
     const card=document.createElement('article');card.className='reminder';
     card.append(text('h3',(item.fields.completed?'✓ ':'')+item.fields.title));
@@ -76,7 +76,9 @@ function dateValue(name,original){
   if(time){const [hour,minute]=time.split(':').map(Number);Object.assign(value,{hour,minute,timeZone:el('timezone').value});}
   return value;
 }
-function controlsBusy(value){for(const button of document.querySelectorAll('button'))button.disabled=value;}
+function pageControls(){el('next').disabled=busy||!nextPage;el('previous').disabled=busy||!previousPage;}
+function controlsBusy(value){for(const button of document.querySelectorAll('button'))button.disabled=value;pageControls();}
+el('next').addEventListener('click',()=>run(()=>load({after:nextPage})));el('previous').addEventListener('click',()=>run(()=>load({before:previousPage})));
 async function run(action){if(busy)return;busy=true;controlsBusy(true);try{await action();}catch(error){status(error.message);}finally{busy=false;controlsBusy(false);}}
 el('pair-form').addEventListener('submit',event=>{event.preventDefault();run(async()=>{const secret=el('secret').value;el('secret').value='';await api('/api/pair',{secret});await refresh();});});
 el('refresh').addEventListener('click',()=>run(refresh));el('forget').addEventListener('click',()=>{clear();status('Page cleared. Revoke this client in the Mac app to end its session.');});

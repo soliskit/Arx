@@ -231,10 +231,16 @@ public struct Mutation: Codable, Sendable {
   }
 }
 
+public struct ReminderPage: Codable, Sendable {
+  public var items: [SharedReminder]
+  public var next: String?
+  public var previous: String?
+}
+
 @MainActor public protocol ReminderStore: AnyObject {
   var authorized: Bool { get }
   func lists() throws -> [ReminderList]
-  func reminders(in list: String) async throws -> [SharedReminder]
+  func reminderIDs(in list: String) async throws -> [String]
   func current(_ id: String) throws -> SharedReminder
   func create(in list: String, fields: ReminderFields) throws -> SharedReminder
   func save(_ item: SharedReminder, replacing base: SharedReminder) throws -> SharedReminder

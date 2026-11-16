@@ -17,7 +17,7 @@ import Foundation
         writable: $0.allowsContentModifications)
     }
   }
-  func reminders(in list: String) async throws -> [SharedReminder] {
+  func reminderIDs(in list: String) async throws -> [String] {
     let calendar = try calendar(list)
     let predicate = store.predicateForReminders(in: [calendar])
     let identifiers: [String] = try await withCheckedThrowingContinuation { continuation in
@@ -30,10 +30,7 @@ import Foundation
       }
     }
     try access()
-    return identifiers.compactMap { id in
-      guard let item = try? object(id), item.calendar.calendarIdentifier == list else { return nil }
-      return snapshot(item)
-    }
+    return identifiers
   }
   func current(_ id: String) throws -> SharedReminder { snapshot(try object(id)) }
   func create(in list: String, fields: ReminderFields) throws -> SharedReminder {

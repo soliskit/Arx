@@ -29,7 +29,10 @@ struct ContentView: View {
                 Text(list.source + (list.writable ? "" : " · Read-only")).font(.caption)
                   .foregroundStyle(.secondary)
               }
-            }.tag(list.id)
+            }
+            .accessibilityLabel(list.title)
+            .accessibilityIdentifier("list-grant-" + list.id)
+            .tag(list.id)
           }
           Button("Refresh lists") { model.refresh() }
         } else {
@@ -40,6 +43,7 @@ struct ContentView: View {
             .borderedProminent)
         }
       }.padding().navigationTitle("Lists to share")
+        .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
     } detail: {
       ScrollView {
         VStack(alignment: .leading, spacing: 20) {
@@ -51,7 +55,7 @@ struct ContentView: View {
                 .disabled(model.running || model.starting)
               TextField("Local port", text: $model.port).disabled(model.running || model.starting)
               Text(
-                "The Mac and connector must stay running. This app does not install or start a tunnel."
+                "Keep the Mac, Arx and your connector running."
               ).font(.caption).foregroundStyle(.secondary)
               HStack {
                 Button(
@@ -66,14 +70,14 @@ struct ContentView: View {
           }
           GroupBox("New client") {
             VStack(alignment: .leading, spacing: 10) {
-              TextField("Client label (not verified identity)", text: $model.label)
+              TextField("Client label", text: $model.label)
               Toggle("Read selected lists", isOn: $model.rights.read)
               Toggle("Create, edit, move, complete and reopen", isOn: $model.rights.manage)
                 .disabled(!model.rights.read)
               Toggle("Delete reminders with confirmation", isOn: $model.rights.delete)
                 .disabled(!model.rights.read)
               Text(
-                "Checkboxes set the new client's grant. Existing grants do not change. Revoke and pair again to change an existing client's rights."
+                "Select this new client's access. To change an existing client, revoke and pair again."
               ).font(.caption).foregroundStyle(.secondary)
               Button("Create single-use pairing secret") { model.pair() }.disabled(
                 !model.running && !model.starting)
@@ -106,7 +110,7 @@ struct ContentView: View {
             }.frame(maxWidth: .infinity, alignment: .leading).padding(6)
           }
           Text(
-            "Revocation stops new requests. It cannot erase data already seen or undo a change already saved. External Reminders/iCloud edits can race with a save; detected conflicts require refresh and review."
+            "Revoke stops new requests. Data already viewed and changes already saved remain."
           ).font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(maxWidth: 760, alignment: .leading)
       }.navigationTitle("Sharing")

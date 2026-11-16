@@ -18,8 +18,8 @@ import Foundation
     guard authorized else { throw BridgeFailure.unavailable }
     return collections
   }
-  public func reminders(in list: String) async throws -> [SharedReminder] {
-    let snapshot = rows.values.filter { $0.listID == list }
+  public func reminderIDs(in list: String) async throws -> [String] {
+    let snapshot = rows.values.filter { $0.listID == list }.map(\.id)
     await beforeFetch?()
     return snapshot
   }
