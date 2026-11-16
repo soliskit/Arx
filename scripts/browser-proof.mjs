@@ -53,7 +53,7 @@ const waitForExit = (child, milliseconds) =>
     child.once("exit", onExit);
   });
 const stopChild = async (child, allowGracefulExit = false) => {
-  if (!child || exited(child)) {
+  if (!child || child.pid === undefined || exited(child)) {
     return;
   }
   if (allowGracefulExit && (await waitForExit(child, 3000))) {
@@ -167,10 +167,42 @@ try {
       `--user-data-dir=${join(temporary, "chrome")}`,
       "about:blank",
     ],
-    { stdio: "ignore" },
+    { stdio: ["ignore", "ignore", "pipe"] },
   );
+  let launchError, exitStatus;
+  let chromeStderr = Buffer.alloc(0);
+  browser.on("error", (error) => {
+    launchError = error;
+  });
+  browser.on("exit", (code, signal) => {
+    exitStatus = { code, signal };
+  });
+  browser.stderr.on("data", (chunk) => {
+    chromeStderr = Buffer.concat([chromeStderr, chunk]).subarray(-8192);
+  });
+  const startupFailure = (reason) =>
+    Error(
+      `Fixture Chrome ${reason}; launch error: ${launchError?.message || "none"}; exit: ${JSON.stringify(exitStatus || null)}; stderr (latest 8 KiB):\n${chromeStderr.toString("utf8")}`,
+    );
   const active = join(temporary, "chrome", "DevToolsActivePort");
-  await poll(() => existsSync(active));
+  await poll(() => {
+    if (launchError) {
+      throw startupFailure("launch failed");
+    }
+    if (exitStatus) {
+      throw startupFailure("exited before readiness");
+    }
+    return existsSync(active);
+  });
+  if (launchError) {
+    throw startupFailure("launch failed");
+  }
+  if (exitStatus) {
+    throw startupFailure("exited before readiness");
+  }
+  if (!existsSync(active)) {
+    throw startupFailure("readiness timed out");
+  }
   const port = readFileSync(active, "utf8").split("\n")[0];
   const targets = await (
     await fetch(`http://127.0.0.1:${port}/json/list`)
