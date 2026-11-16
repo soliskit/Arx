@@ -32,12 +32,8 @@ effective-entitlements.plist
 # Local native-test build products
 /.build-unit-tests/
 
-# Xcode-generated Swift package workspace and named schemes
-/.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
-/.swiftpm/xcode/xcshareddata/xcschemes/ArxBridge-Package.xcscheme
-/.swiftpm/xcode/xcshareddata/xcschemes/BridgeCore.xcscheme
-/.swiftpm/xcode/xcshareddata/xcschemes/BridgeFixtureServer.xcscheme
-
-# Literal non-hidden paths reported with the generated package files
-/swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
-/swiftpm/xcode/xcshareddata/xcschemes/ArxBridge-Package.xcscheme
+# Xcode-generated Swift package workspaces and schemes
+/.swiftpm/xcode/package.xcworkspace/
+/.swiftpm/xcode/xcshareddata/xcschemes/
+/swiftpm/xcode/package.xcworkspace/
+/swiftpm/xcode/xcshareddata/xcschemes/
