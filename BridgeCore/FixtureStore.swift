@@ -1,3 +1,10 @@
+//
+//  FixtureStore.swift
+//  Arx
+//
+//  Created by David Solis on 11/15/26.
+//
+
 import Foundation
 
 @MainActor public final class FixtureStore: ReminderStore {
