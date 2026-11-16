@@ -118,7 +118,7 @@ import Foundation
 }
 
 do {
-  exit(try withFixtureDisplay())
+  exit(try await withFixtureDisplay())
 } catch {
   FileHandle.standardError.write(Data("Fixture display error: \(error)\n".utf8))
   exit(1)

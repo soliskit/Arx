@@ -108,6 +108,15 @@ jobs:
           if [ -d /Applications/Xcode_27.2.app ]; then
             sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
           fi
+      - name: Compile and safely probe the fixture display script
+        run: |
+          set -euo pipefail
+          swiftc -typecheck scripts/fixture-display.swift
+          status=0
+          CI=false swift scripts/fixture-display.swift scripts/capture-mac.sh > "$RUNNER_TEMP/fixture-display-probe.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/fixture-display-probe.log"
+          test "$status" -eq 1
+          grep -Fq 'Display setup is restricted to CI.' "$RUNNER_TEMP/fixture-display-probe.log"
       - name: Resolve the pinned Xcode dependency graph
         run: xcodebuild -resolvePackageDependencies -project Arx.xcodeproj -scheme Arx -onlyUsePackageVersionsFromResolvedFile
       - name: Build the app
