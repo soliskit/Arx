@@ -56,7 +56,7 @@ jobs:
                   print(target, config, 'SUPPORTED_PLATFORMS=' + settings['SUPPORTED_PLATFORMS'], 'SDKROOT=' + settings.get('SDKROOT', ''))
           PYTHON
       - name: Lint the Swift sources
-        run: swift format lint --strict --recursive BridgeCore BridgeCoreTests BridgeFixtureServer Arx ArxTests ArxUITests Package.swift
+        run: swift format lint --strict --recursive BridgeCore BridgeCoreTests BridgeFixtureServer Arx ArxTests ArxUITests Package.swift scripts/fixture-display.swift
       - name: Run bridge package tests
         run: swift test --parallel
       - name: Verify browser script syntax
