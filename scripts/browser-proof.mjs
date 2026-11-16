@@ -9,9 +9,29 @@ import assert from 'node:assert/strict';
 const temporary=mkdtempSync(join(tmpdir(),'arx-fixture-'));
 const evidence=resolve(process.argv[3]||'browser-evidence');mkdirSync(evidence,{recursive:true});
 const chrome=process.env.CHROME_PATH||(process.platform==='darwin'?'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome':'/usr/bin/chromium');
-let proxy,browser,server,ws;
+let proxy,browser,server,ws,send,primaryError;
 let logs="";
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
+const exited=child=>child.exitCode!==null||child.signalCode!==null;
+const waitForExit=(child,milliseconds)=>new Promise(resolveExit=>{
+  if(exited(child)){resolveExit(true);return;}
+  const finish=didExit=>{clearTimeout(timer);child.removeListener('exit',onExit);resolveExit(didExit);};
+  const onExit=()=>finish(true);
+  const timer=setTimeout(()=>finish(false),milliseconds);
+  child.once('exit',onExit);
+});
+const stopChild=async(child,allowGracefulExit=false)=>{
+  if(!child||exited(child))return;
+  if(allowGracefulExit&&await waitForExit(child,3000))return;
+  child.kill('SIGTERM');
+  if(await waitForExit(child,3000))return;
+  child.kill('SIGKILL');
+  if(!await waitForExit(child,3000))throw Error('Fixture child did not exit after SIGKILL');
+};
+const requestBrowserClose=()=>new Promise(resolveClose=>{
+  const timer=setTimeout(resolveClose,3000);
+  send('Browser.close').then(()=>{clearTimeout(timer);resolveClose();},()=>{clearTimeout(timer);resolveClose();});
+});
 try{
   execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-keyout',join(temporary,'key.pem'),'-out',join(temporary,'cert.pem'),'-days','1','-subj','/CN=bridge.example.test','-addext','subjectAltName=DNS:bridge.example.test'],{stdio:'ignore'});
   const binary=resolve(process.argv[2]);
@@ -32,7 +52,7 @@ try{
   const targets=await(await fetch('http://127.0.0.1:'+port+'/json/list')).json();
   ws=new WebSocket(targets.find(t=>t.type==='page').webSocketDebuggerUrl);await new Promise((r,j)=>{ws.addEventListener('open',r,{once:true});ws.addEventListener('error',j,{once:true});});
   let serial=0;const pending=new Map();ws.addEventListener('message',event=>{const m=JSON.parse(event.data);if(m.id&&pending.has(m.id)){const {r,j}=pending.get(m.id);pending.delete(m.id);m.error?j(Error(JSON.stringify(m.error))):r(m.result);}});
-  const send=(method,params={})=>new Promise((r,j)=>{const id=++serial;pending.set(id,{r,j});ws.send(JSON.stringify({id,method,params}));});
+  send=(method,params={})=>new Promise((r,j)=>{const id=++serial;pending.set(id,{r,j});ws.send(JSON.stringify({id,method,params}));});
   const evaluate=async expression=>{const result=await send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;};
   const until=async expression=>{for(let i=0;i<100;i++){if(await evaluate(expression))return;await wait(100);}throw Error('Browser condition timed out: '+expression);};
   const enabled=async()=>{await until('!busy');assert.equal(await evaluate('[...document.querySelectorAll("#reminders button")].some(b=>b.disabled)'),false);};
@@ -97,14 +117,34 @@ try{
   writeFileSync(join(evidence,'results.json'),JSON.stringify({https:true,httpOnlySecureSameSite:true,noWebStorage:true,selectedList:true,pagination:true,create:true,edit:true,move:true,complete:true,reopen:true,delete:true,escapedText:true,csrfDenied:true,denialClearsPrivateUI:true},null,2));
   console.log('HTTPS/browser fixture checks passed. No real account data used.');
 }catch(error){
-  // Report the primary failure before cleanup; Chrome may still be flushing
-  // its disposable profile when its parent exits.
+  primaryError=error;
   console.error(error);
   writeFileSync(join(evidence,'failure.txt'),String(error)+'\n'+logs);
-  throw error;
 }finally{
-  ws?.close();browser?.kill('SIGTERM');server?.kill('SIGTERM');
-  if(proxy)await new Promise(r=>proxy.close(r));
-  for(const child of [browser,server])if(child&&child.exitCode===null)await Promise.race([new Promise(r=>child.once('exit',r)),wait(3000).then(()=>child.kill('SIGKILL'))]);
-  rmSync(temporary,{recursive:true,force:true,maxRetries:10,retryDelay:200});
+  const cleanupFailures=[];
+  try{
+    if(send&&ws?.readyState===WebSocket.OPEN)await requestBrowserClose();
+    await stopChild(browser,true);
+  }catch(error){cleanupFailures.push(error);}
+  ws?.close();
+  try{await stopChild(server);}catch(error){cleanupFailures.push(error);}
+  try{
+    if(proxy){
+      const closed=new Promise((resolveClose,rejectClose)=>proxy.close(error=>error?rejectClose(error):resolveClose()));
+      proxy.closeAllConnections();
+      await closed;
+    }
+  }catch(error){cleanupFailures.push(error);}
+  if(cleanupFailures.length===0){
+    try{rmSync(temporary,{recursive:true,force:true,maxRetries:10,retryDelay:200});}
+    catch(error){cleanupFailures.push(error);}
+  }
+  if(cleanupFailures.length){
+    const cleanupError=new AggregateError(cleanupFailures,'Fixture cleanup failed');
+    console.error(cleanupError);
+    writeFileSync(join(evidence,'cleanup-failure.txt'),cleanupFailures.map(String).join('\n'));
+    if(primaryError)throw new AggregateError([primaryError,cleanupError],'Fixture assertion and cleanup both failed');
+    throw cleanupError;
+  }
 }
+if(primaryError)throw primaryError;

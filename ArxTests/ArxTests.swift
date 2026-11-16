@@ -1,3 +1,10 @@
+//
+//  ArxTests.swift
+//  ArxTests
+//
+//  Created by David Solis on 11/15/26.
+//
+
 import BridgeCore
 import Testing
 
