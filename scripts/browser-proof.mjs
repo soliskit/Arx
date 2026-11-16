@@ -13,6 +13,7 @@ import { join, resolve } from "node:path";
 import https from "node:https";
 import http from "node:http";
 import assert from "node:assert/strict";
+import { checkBrowserOutcomes } from "./browser-outcomes.mjs";
 const temporary = mkdtempSync(join(tmpdir(), "arx-fixture-"));
 const evidence = resolve(process.argv[3] || "browser-evidence");
 mkdirSync(evidence, { recursive: true });
@@ -392,11 +393,18 @@ try {
     '!document.getElementById("reminders").textContent.includes("Edited fixture notes")',
   );
   assert.deepEqual(dialogs, ["confirm", "prompt"]);
+  await checkBrowserOutcomes({ evaluate, until, screenshot });
   const csrfDenied = await evaluate(
     'fetch("/api/read",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({listID})}).then(r=>r.status)',
   );
   assert.equal(csrfDenied, 403);
   await evaluate('csrf="";api("/api/read",{listID}).catch(()=>{})');
+  assert.equal(
+    await evaluate('document.getElementById("pairing").hidden'),
+    true,
+  );
+  await send("Network.clearBrowserCookies");
+  await evaluate('api("/api/session").catch(()=>{})');
   await until('document.getElementById("pairing").hidden===false');
   await screenshot("06-denied-cleared");
   writeFileSync(
