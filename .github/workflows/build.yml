@@ -64,7 +64,7 @@ jobs:
           bash scripts/install-linters.sh
           npm run lint
       - name: Lint the Swift sources
-        run: swift format lint --strict --recursive BridgeCore BridgeCoreTests BridgeFixtureServer Arx ArxTests ArxUITests Package.swift
+        run: swift format lint --strict --recursive BridgeCore BridgeCoreTests BridgeFixtureServer Arx ArxTests ArxUITests Package.swift scripts/fixture-display.swift
       - name: Run bridge package tests
         run: swift test --parallel
       - name: Verify browser script syntax

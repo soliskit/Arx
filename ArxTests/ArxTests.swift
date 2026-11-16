@@ -1,3 +1,4 @@
+import BridgeCore
 import Testing
 
 @testable import Arx

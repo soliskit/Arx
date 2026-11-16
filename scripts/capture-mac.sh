@@ -1,5 +1,8 @@
 #!/bin/bash
 set -euo pipefail
+if [[ "${CI:-}" == true && "${ARX_FIXTURE_DISPLAY_READY:-}" != 1 ]]; then
+  exec swift scripts/fixture-display.swift "$0"
+fi
 APP="${PWD}/.build/Build/Products/Debug/Arx.app"
 [[ -d "${APP}" ]] || { echo "Built app not found"; exit 1; }
 "${APP}/Contents/MacOS/Arx" --bridge-fixtures >fixture-app.log 2>&1 &
@@ -57,25 +60,26 @@ APPLESCRIPT
 }
 native() {
   osascript - "$@" <<'APPLESCRIPT'
-on attributeValue(node, key)
-  tell application "System Events" to return value of attribute key of node
+on attributeValue(node, attributeName)
+  tell application "System Events" to return value of attribute attributeName of node
 end attributeValue
-on optionalAttribute(node, key)
+on optionalAttribute(node, attributeName)
   try
-    return my attributeValue(node, key)
+    return my attributeValue(node, attributeName)
   on error
     return missing value
   end try
 end optionalAttribute
 on describeNode(node)
   log node
+  local attributeName, found
   repeat with keyRef in {"AXRole", "AXIdentifier", "AXTitle", "AXDescription", "AXValue", "AXEnabled"}
-    set key to contents of keyRef
+    set attributeName to contents of keyRef
     try
-      set found to my attributeValue(node, key)
-      log (key & "=" & (found as text))
+      set found to my attributeValue(node, attributeName)
+      log (attributeName & "=" & (found as text))
     on error messageText number errorNumber
-      log (key & " ERROR " & errorNumber & ": " & messageText)
+      log (attributeName & " ERROR " & errorNumber & ": " & messageText)
     end try
   end repeat
   tell application "System Events"
@@ -87,6 +91,7 @@ on describeNode(node)
   end tell
 end describeNode
 on findCheckbox(expectedID)
+  local root, nodes, matches, node, descendants, childNode
   tell application "System Events" to tell process "Arx"
     set root to outline 1 of scroll area 1 of group 1 of splitter group 1 of group 1 of window 1
     set nodes to entire contents of root
@@ -111,6 +116,7 @@ on findCheckbox(expectedID)
   return item 1 of matches
 end findCheckbox
 on run argv
+  local nodes, expectedID, expectedValue, target, beforeValue, afterValue
   if item 1 of argv is "dump" then
     tell application "System Events" to tell process "Arx" to set nodes to entire contents of window 1
     repeat with nodeRef in nodes
