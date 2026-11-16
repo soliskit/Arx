@@ -1,0 +1,17 @@
+# Xcode user settings
+xcuserdata/
+
+# Xcode build files
+*.hmap
+
+# App packages and debug symbols
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# Swift Package Manager and local builds
+.build/

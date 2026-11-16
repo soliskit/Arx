@@ -1,0 +1,89 @@
+// Fixture-only HTTPS/browser qualification. No real Reminders or tunnel account.
+import { spawn, execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import https from 'node:https';
+import http from 'node:http';
+import assert from 'node:assert/strict';
+const temporary=mkdtempSync(join(tmpdir(),'arx-fixture-'));
+const evidence=resolve(process.argv[3]||'browser-evidence');mkdirSync(evidence,{recursive:true});
+const chrome=process.env.CHROME_PATH||(process.platform==='darwin'?'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome':'/usr/bin/chromium');
+let proxy,browser,server,ws;
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+try{
+  execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-keyout',join(temporary,'key.pem'),'-out',join(temporary,'cert.pem'),'-days','1','-subj','/CN=bridge.example.test','-addext','subjectAltName=DNS:bridge.example.test'],{stdio:'ignore'});
+  const binary=resolve(process.argv[2]);
+  server=spawn(binary,['https://bridge.example.test:19443',temporary,'18766'],{stdio:['ignore','pipe','pipe']});
+  let logs='';server.stdout.on('data',x=>{logs+=x;});server.stderr.on('data',x=>{logs+=x;});
+  for(let i=0;i<100&&!existsSync(join(temporary,'ready'));i++){if(server.exitCode!==null)throw Error('Fixture process exited: '+logs);await wait(100);}
+  const secret=readFileSync(join(temporary,'pairing'),'utf8');
+  proxy=https.createServer({key:readFileSync(join(temporary,'key.pem')),cert:readFileSync(join(temporary,'cert.pem'))},(req,res)=>{
+    const headers={...req.headers,host:'bridge.example.test:19443','x-forwarded-proto':'https'};
+    const upstream=http.request({hostname:'127.0.0.1',port:18766,path:req.url,method:req.method,headers},r=>{res.writeHead(r.statusCode,r.headers);r.pipe(res);});
+    upstream.on('error',()=>{res.writeHead(503);res.end('{}');});req.pipe(upstream);
+  });
+  await new Promise(r=>proxy.listen(19443,'127.0.0.1',r));
+  browser=spawn(chrome,['--headless=new','--no-sandbox','--ignore-certificate-errors','--no-proxy-server','--host-resolver-rules=MAP bridge.example.test 127.0.0.1','--remote-debugging-port=0','--user-data-dir='+join(temporary,'chrome'),'about:blank'],{stdio:'ignore'});
+  const active=join(temporary,'chrome','DevToolsActivePort');
+  for(let i=0;i<100&&!existsSync(active);i++)await wait(100);
+  const port=readFileSync(active,'utf8').split('\n')[0];
+  const targets=await(await fetch('http://127.0.0.1:'+port+'/json/list')).json();
+  ws=new WebSocket(targets.find(t=>t.type==='page').webSocketDebuggerUrl);await new Promise((r,j)=>{ws.addEventListener('open',r,{once:true});ws.addEventListener('error',j,{once:true});});
+  let serial=0;const pending=new Map();ws.addEventListener('message',event=>{const m=JSON.parse(event.data);if(m.id&&pending.has(m.id)){const {r,j}=pending.get(m.id);pending.delete(m.id);m.error?j(Error(JSON.stringify(m.error))):r(m.result);}});
+  const send=(method,params={})=>new Promise((r,j)=>{const id=++serial;pending.set(id,{r,j});ws.send(JSON.stringify({id,method,params}));});
+  const evaluate=async expression=>{const result=await send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;};
+  const until=async expression=>{for(let i=0;i<100;i++){if(await evaluate(expression))return;await wait(100);}throw Error('Browser condition timed out: '+expression);};
+  const screenshot=async name=>{const {data}=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});writeFileSync(join(evidence,name+'.png'),Buffer.from(data,'base64'));};
+  await send('Page.enable');await send('Page.navigate',{url:'https://bridge.example.test:19443/'});
+  await until('document.getElementById("secret")!==null');
+  await until('document.getElementById("status").textContent.includes("Pair this browser")');
+  assert.equal(await evaluate('document.body.textContent.includes("Return the library book")'),false);
+  await screenshot('01-unpaired');
+  await evaluate('document.getElementById("secret").value='+JSON.stringify(secret)+';document.getElementById("pair-form").requestSubmit()');
+  await until('!document.getElementById("workspace").hidden');
+  const cookie=await send('Network.getCookies',{urls:['https://bridge.example.test:19443/']});
+  assert.ok(cookie.cookies.some(c=>c.name==='__Host-arx'&&c.httpOnly&&c.secure&&c.sameSite==='Strict'));
+  assert.equal(await evaluate('document.cookie.includes("__Host-arx")'),false);
+  assert.equal(await evaluate('Object.keys(localStorage).length+Object.keys(sessionStorage).length'),0);
+  await evaluate('[...document.querySelectorAll("#lists button")].find(b=>b.textContent==="Inbox").click()');await until('document.getElementById("reminders").textContent.includes("Return the library book")');
+  await screenshot('02-selected-list');
+  // Use the app's own UI to create, edit, complete/reopen and delete fixture data.
+  await evaluate('document.getElementById("new").click();document.getElementById("title").value="<img src=x onerror=alert(1)>";document.getElementById("notes").value="Safe text";document.getElementById("edit-form").requestSubmit()');
+  await until('document.getElementById("reminders").textContent.includes("<img src=x onerror=alert(1)>")');
+  assert.equal(await evaluate('document.querySelectorAll("#reminders img").length'),0);
+  await screenshot('03-escaped-reminder');
+  const findCard='[...document.querySelectorAll("#reminders article")].find(n=>n.textContent.includes("<img src=x onerror=alert(1)>"))';
+  await evaluate(findCard+'.querySelector("button").click()');
+  await until('!document.getElementById("editor").hidden');await screenshot('04-editor');
+  await evaluate('document.getElementById("notes").value="Edited fixture notes";document.getElementById("edit-form").requestSubmit()');
+  await until('document.getElementById("reminders").textContent.includes("Edited fixture notes")');
+  const clickAction=async label=>evaluate('[...'+findCard+'.querySelectorAll("button")].find(b=>b.textContent==='+JSON.stringify(label)+').click()');
+  await clickAction('Complete');
+  await until(findCard+'.querySelector("h3").textContent.startsWith("✓")');
+  await clickAction('Reopen');
+  await until('!'+findCard+'.querySelector("h3").textContent.startsWith("✓")');
+  await clickAction('Move');
+  await until('!document.getElementById("reminders").textContent.includes("<img src=x onerror=alert(1)>")');
+  await evaluate('[...document.querySelectorAll("#lists button")].find(b=>b.textContent==="Weekend").click()');
+  await until('document.getElementById("reminders").textContent.includes("Edited fixture notes")');
+  await screenshot('05-moved-fixture');
+  const dialogs=[];
+  ws.addEventListener('message',event=>{const m=JSON.parse(event.data);if(m.method==='Page.javascriptDialogOpening'){
+    dialogs.push(m.params.type);send('Page.handleJavaScriptDialog',{accept:true,promptText:'<img src=x onerror=alert(1)>'});
+  }});
+  await clickAction('Delete');
+  await until('!document.getElementById("reminders").textContent.includes("Edited fixture notes")');
+  assert.deepEqual(dialogs,['confirm','prompt']);
+  const csrfDenied=await evaluate('fetch("/api/read",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({listID})}).then(r=>r.status)');assert.equal(csrfDenied,403);
+  await evaluate('csrf="";api("/api/read",{listID}).catch(()=>{})');
+  await until('document.getElementById("pairing").hidden===false');
+  await screenshot('06-denied-cleared');
+  writeFileSync(join(evidence,'results.json'),JSON.stringify({https:true,httpOnlySecureSameSite:true,noWebStorage:true,selectedList:true,create:true,edit:true,move:true,complete:true,reopen:true,delete:true,escapedText:true,csrfDenied:true,denialClearsPrivateUI:true},null,2));
+  console.log('HTTPS/browser fixture checks passed. No real account data used.');
+}finally{
+  ws?.close();browser?.kill('SIGTERM');server?.kill('SIGTERM');
+  if(proxy)await new Promise(r=>proxy.close(r));
+  for(const child of [browser,server])if(child&&child.exitCode===null)await Promise.race([new Promise(r=>child.once('exit',r)),wait(3000).then(()=>child.kill('SIGKILL'))]);
+  rmSync(temporary,{recursive:true,force:true});
+}
