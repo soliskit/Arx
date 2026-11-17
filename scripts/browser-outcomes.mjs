@@ -167,6 +167,16 @@ export async function checkBrowserOutcomes({ evaluate, until, screenshot }) {
         "",
       );
       assert.match(await status(), /Access could not be verified/);
+      assert.equal(
+        await evaluate(
+          'el("title").value+el("notes").value+el("advanced-warning").textContent',
+        ),
+        "",
+      );
+      assert.equal(
+        await evaluate('el("list-title").textContent'),
+        "Choose a list",
+      );
       await screenshot(`06d-${failure}-cleared`);
       await mode("normal");
       await evaluate("run(refresh)");

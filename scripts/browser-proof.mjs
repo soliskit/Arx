@@ -14,6 +14,8 @@ import https from "node:https";
 import http from "node:http";
 import assert from "node:assert/strict";
 import { checkBrowserOutcomes } from "./browser-outcomes.mjs";
+import { checkBrowserInput } from "./browser-input.mjs";
+import { startupDiagnostics } from "./browser-startup.mjs";
 const temporary = mkdtempSync(join(tmpdir(), "arx-fixture-"));
 const evidence = resolve(process.argv[3] || "browser-evidence");
 mkdirSync(evidence, { recursive: true });
@@ -24,6 +26,7 @@ const chrome =
     : "/usr/bin/chromium");
 let proxy, browser, server, ws, send, primaryError, cleanupError;
 let logs = "";
+let startup;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const poll = async (check, attempts = 100) => {
   if (await check()) {
@@ -156,6 +159,8 @@ try {
     },
   );
   await new Promise((r) => proxy.listen(19443, "127.0.0.1", r));
+  startup = startupDiagnostics(chrome, temporary);
+  startup.mark("spawn-request");
   browser = spawn(
     chrome,
     [
@@ -172,10 +177,13 @@ try {
   );
   let launchError, exitStatus;
   let chromeStderr = Buffer.alloc(0);
+  browser.on("spawn", () => startup.mark("spawn"));
   browser.on("error", (error) => {
+    startup.mark("launch-error");
     launchError = error;
   });
   browser.on("exit", (code, signal) => {
+    startup.mark("exit", { code, signal });
     exitStatus = { code, signal };
   });
   browser.stderr.on("data", (chunk) => {
@@ -202,12 +210,18 @@ try {
     throw startupFailure("exited before readiness");
   }
   if (!existsSync(active)) {
+    startup.mark("readiness-timeout", {
+      debuggingFile: false,
+      connectionAnswered: false,
+    });
     throw startupFailure("readiness timed out");
   }
+  startup.mark("debugging-file", { debuggingFile: true });
   const port = readFileSync(active, "utf8").split("\n")[0];
   const targets = await (
     await fetch(`http://127.0.0.1:${port}/json/list`)
   ).json();
+  startup.mark("debugging-connection", { connectionAnswered: true });
   ws = new WebSocket(
     targets.find((t) => t.type === "page").webSocketDebuggerUrl,
   );
@@ -264,6 +278,13 @@ try {
     writeFileSync(join(evidence, `${name}.png`), Buffer.from(data, "base64"));
   };
   await send("Page.enable");
+  await send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `const originalInterval = window.setInterval.bind(window);
+      window.setInterval = (callback, delay, ...args) => {
+        if (delay === 30000) window.fixtureHeartbeat = callback;
+        return originalInterval(callback, delay, ...args);
+      };`,
+  });
   await send("Page.navigate", { url: "https://bridge.example.test:19443/" });
   await until('document.getElementById("secret")!==null');
   await until(
@@ -393,6 +414,7 @@ try {
     '!document.getElementById("reminders").textContent.includes("Edited fixture notes")',
   );
   assert.deepEqual(dialogs, ["confirm", "prompt"]);
+  await checkBrowserInput({ evaluate, until, send, screenshot });
   await checkBrowserOutcomes({ evaluate, until, screenshot });
   const csrfDenied = await evaluate(
     'fetch("/api/read",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({listID})}).then(r=>r.status)',
@@ -403,9 +425,24 @@ try {
     await evaluate('document.getElementById("pairing").hidden'),
     true,
   );
+  await evaluate(
+    `openEditor(null);el("title").value="Private denied title";el("notes").value="Private denied notes";el("advanced-warning").textContent="Private warning";`,
+  );
   await send("Network.clearBrowserCookies");
   await evaluate('api("/api/session").catch(()=>{})');
   await until('document.getElementById("pairing").hidden===false');
+  assert.deepEqual(
+    await evaluate(
+      '({title:el("title").value,notes:el("notes").value,heading:el("list-title").textContent,warning:el("advanced-warning").textContent,editing})',
+    ),
+    {
+      title: "",
+      notes: "",
+      heading: "Choose a list",
+      warning: "",
+      editing: null,
+    },
+  );
   await screenshot("06-denied-cleared");
   writeFileSync(
     join(evidence, "results.json"),
@@ -438,6 +475,7 @@ try {
   process.stderr.write(`${String(error)}\n`);
   writeFileSync(join(evidence, "failure.txt"), `${String(error)}\n${logs}`);
 } finally {
+  startup?.write(join(evidence, "startup.json"));
   const cleanupFailures = [];
   try {
     if (send && ws?.readyState === WebSocket.OPEN) {
