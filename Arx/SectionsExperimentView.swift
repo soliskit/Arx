@@ -145,7 +145,7 @@ nonisolated struct SectionsReply: Codable, Sendable {
       self.message =
         reply.state == "labels"
         ? "Select only the disposable Arx Test A list." : "Stopped: " + reply.reason
-      if reply.state != "labels" { self.stop(reply) }
+      if reply.state != "labels" { self.stop(reply, action: "labels") }
     }
   }
 
@@ -157,7 +157,7 @@ nonisolated struct SectionsReply: Codable, Sendable {
       fields: ["sourceID": list.sourceID, "listID": list.id, "scratchConfirmed": "yes"]
     ) { reply in
       guard reply.state == "item", let item = reply.item else {
-        self.stop(reply)
+        self.stop(reply, action: "locate")
         return
       }
       self.item = item
@@ -176,23 +176,50 @@ nonisolated struct SectionsReply: Codable, Sendable {
         "expectedSection": expectedSection, "scratchConfirmed": "yes",
       ]
     ) { reply in
-      self.stop(reply)
+      self.stop(reply, action: "read")
     }
   }
 
-  private func stop(_ reply: SectionsReply) {
+  private func stop(_ reply: SectionsReply, action: String) {
     finished = true
     item = nil
     lists = []
     confirmed = false
-    message = "Experiment stopped. " + reply.reason
+    let reason = Self.diagnosticReason(reply.reason)
+    let step = ["labels": "labels", "locate": "selection", "read": "read"][action] ?? "unknown"
+    message = "Experiment stopped. " + step + ": " + reason
     let status =
       reply.state == "section" && reply.sectionMatched == true
       ? "candidate section matched" : "unknown or mismatch - stopped"
     // Only this report may leave the Mac. No worker output, IDs, text or logs.
     report =
       "OS/build: " + ProcessInfo.processInfo.operatingSystemVersionString + "\nStatus: " + status
+      + "\nStep: " + step + "\nReason: " + reason
       + "\nSection matched: " + (reply.sectionMatched == true ? "yes" : "not established")
+  }
+
+  // Closed vocabulary at the final display/copy boundary. Never echo worker text.
+  static func diagnosticReason(_ reason: String) -> String {
+    switch reason {
+    case "existing_permission_unavailable": "existing permission unavailable"
+    case "label_bound_exceeded": "label limit exceeded"
+    case "labels_unverified": "labels unverified"
+    case "selection_unavailable": "selection unavailable"
+    case "selection_timeout": "selection timed out"
+    case "selection_not_exactly_one": "expected one reminder"
+    case "identity_unverified": "object binding unverified"
+    case "private_framework_unavailable": "private framework unavailable"
+    case "membership_api_unavailable": "membership API unavailable"
+    case "membership_unverified": "membership unverified"
+    case "section_name_mismatch": "expected section did not match"
+    case "private_api_exception": "private API exception"
+    case "denied": "scope refused"
+    case "timeout": "worker timed out; read unknown"
+    case "worker_unavailable": "worker result unavailable; read unknown"
+    case "exact_object_candidate": "candidate section matched"
+    case "fixture": "synthetic fixture"
+    default: "unrecognized result; read unknown"
+    }
   }
 
   private func perform(
