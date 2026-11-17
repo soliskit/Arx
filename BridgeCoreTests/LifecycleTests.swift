@@ -106,7 +106,7 @@ import Testing
     for index in 0..<510 {
       #expect(
         throws: WriteFailure(
-          index < 500 ? .ambiguous : .rateLimited, outcome: index < 500 ? .unknown : .refused)
+          index < 500 ? .ambiguous : .sessionFull, outcome: index < 500 ? .unknown : .refused)
       ) {
         try controller.mutate(
           state.token, csrf: state.csrf,

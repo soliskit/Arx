@@ -191,6 +191,10 @@ public struct BridgeServer: Sendable {
       status = .contentTooLarge
       message =
         "This request exceeds its body limit (64 KiB for pairing/reads; 1 MiB for changes)."
+    case BridgeFailure.sessionFull:
+      status = .tooManyRequests
+      message =
+        "This session reached its 500-write limit. Pair again from the Mac app to continue writing."
     case BridgeFailure.rateLimited:
       status = .tooManyRequests
       message = "Requests temporarily limited. Try later."

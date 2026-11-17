@@ -8,7 +8,7 @@
 import Foundation
 
 public enum BridgeFailure: Error, Equatable, Sendable {
-  case denied, invalid, conflict, unavailable, ambiguous, rateLimited, tooLarge
+  case denied, invalid, conflict, unavailable, ambiguous, rateLimited, sessionFull, tooLarge
 }
 
 /// Only a store path proved to run before any persistent write may throw this.
