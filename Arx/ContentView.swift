@@ -9,7 +9,7 @@ import BridgeCore
 import SwiftUI
 
 struct ContentView: View {
-  @State private var model = BridgeViewModel()
+  let model: BridgeViewModel
   @State private var highlighted: String?
   var body: some View {
     @Bindable var model = model
@@ -69,9 +69,11 @@ struct ContentView: View {
                   model.running
                     ? "Listener running" : model.starting ? "Starting listener" : "Start bridge"
                 ) { model.start() }
+                .accessibilityIdentifier("bridge-start")
                 .disabled(!model.connected || model.running || model.starting)
-                Button("Stop all sharing", role: .destructive) { model.stop() }.disabled(
-                  !model.running)
+                Button("Stop all sharing", role: .destructive) { model.stop() }
+                  .accessibilityIdentifier("bridge-stop")
+                  .disabled(!model.running)
               }
             }.padding(6)
           }
@@ -134,4 +136,4 @@ struct ContentView: View {
   }
 }
 
-#Preview { ContentView() }
+#Preview { ContentView(model: BridgeViewModel(fixture: true)) }

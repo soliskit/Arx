@@ -200,3 +200,5 @@ resize 1200 650
 capture wide-return
 osascript -e 'tell application "System Events" to tell process "Arx" to get entire contents of window 1' > navigation-accessibility.txt
 capture diagnostic
+
+bash scripts/check-window-lifetime.sh "${APP}" "${PID}"
