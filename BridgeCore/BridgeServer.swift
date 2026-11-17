@@ -35,6 +35,7 @@ public struct BridgeServer: Sendable {
     "/apple-touch-icon.png": "image/png",
     "/favicon-32.png": "image/png",
     "/favicon.svg": "image/svg+xml",
+    "/logic.js": "text/javascript; charset=utf-8",
     "/style.css": "text/css; charset=utf-8",
   ]
   let sharing: SharingController
