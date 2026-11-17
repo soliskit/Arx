@@ -77,7 +77,7 @@ import Observation
       let server = BridgeServer(sharing: sharing, configuration: config)
       let identity = UUID()
       generation = identity
-      serverTask = Task {
+      serverTask = Task { [self] in
         do {
           try await server.run { [weak self] in
             await self?.listenerStarted(port: config.port, identity: identity)
