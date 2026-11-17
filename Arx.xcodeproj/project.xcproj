@@ -65,6 +65,7 @@
         "SDKROOT": "macosx",
         "REGISTER_APP_GROUPS": "YES",
         "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
+        "SWIFT_OBJC_BRIDGING_HEADER": "Arx/SectionsExperiment/Bridge.h",
         "SWIFT_APPROACHABLE_CONCURRENCY": "YES",
         "SWIFT_DEFAULT_ACTOR_ISOLATION": "MainActor",
         "SWIFT_EMIT_LOC_STRINGS": "YES",
