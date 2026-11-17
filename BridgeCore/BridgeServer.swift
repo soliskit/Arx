@@ -39,6 +39,7 @@ public struct BridgeServer: Sendable {
     -> some ApplicationProtocol
   {
     let router = Router()
+    router.add(middleware: EnvelopeMiddleware(server: self))
     for path in ["/", "/app.js", "/style.css", "/api/session", "/api/lists"] {
       router.get(RouterPath(path)) { request, _ in await handle(request) }
     }
@@ -78,14 +79,6 @@ public struct BridgeServer: Sendable {
   }
   private func handle(_ request: Request) async -> Response {
     do {
-      guard request.head.authority?.lowercased() == configuration.host,
-        header("Host", request) == nil,
-        header("X-Forwarded-Proto", request) == "https",
-        request.uri.query == nil
-      else { throw BridgeFailure.denied }
-      if let origin = header("Origin", request), origin != configuration.origin {
-        throw BridgeFailure.denied
-      }
       let path = request.uri.path
       if request.method == .get, ["/", "/app.js", "/style.css"].contains(path) {
         let name = path == "/" ? "index.html" : String(path.dropFirst())
@@ -98,11 +91,6 @@ public struct BridgeServer: Sendable {
           contentType: path == "/"
             ? "text/html; charset=utf-8"
             : path == "/app.js" ? "text/javascript; charset=utf-8" : "text/css; charset=utf-8")
-      }
-      if request.method == .post {
-        guard header("Origin", request) == configuration.origin,
-          header("Content-Type", request)?.lowercased() == "application/json"
-        else { throw BridgeFailure.denied }
       }
       if path == "/api/pair" {
         let pair: PairRequest = try await decode(request)
@@ -128,10 +116,10 @@ public struct BridgeServer: Sendable {
       if path == "/api/lists" { return try json(try await sharing.sharedLists(token)) }
       // Read is POST so list identifiers don't enter access-log URLs/history.
       if path == "/api/read" {
-        let input: ReadRequest = try await decode(request)
         guard header("X-CSRF-Token", request) == (try await sharing.sessionState(token)).csrf else {
           throw BridgeFailure.denied
         }
+        let input: ReadRequest = try await decode(request)
         return try json(
           try await sharing.read(
             token, list: input.listID, after: input.after, before: input.before))
@@ -146,52 +134,86 @@ public struct BridgeServer: Sendable {
               token, csrf: header("X-CSRF-Token", request) ?? "", command: command)))
       }
       throw BridgeFailure.denied
-    } catch {
-      let status: HTTPResponse.Status
-      let message: String
-      let writeFailure = error as? WriteFailure
-      let failure = writeFailure?.failure ?? (error as? BridgeFailure)
-      switch failure ?? .denied {
-      case BridgeFailure.conflict:
-        status = .conflict
-        message = "This reminder changed. Refresh and review before trying again."
-      case BridgeFailure.invalid:
-        status = .badRequest
-        message = "Check the fields and confirmation."
-      case BridgeFailure.ambiguous:
-        status = .conflict
-        message =
-          "Result uncertain. Refresh and check Reminders. Do not repeat this operation blindly."
-      case BridgeFailure.tooLarge:
-        status = .contentTooLarge
-        message =
-          "This reminder request exceeds 1 MiB, including its original copy. Shorten the notes."
-      case BridgeFailure.rateLimited:
-        status = .tooManyRequests
-        message = "Requests temporarily limited. Try later."
-      case BridgeFailure.unavailable:
-        status = .serviceUnavailable
-        message = "The store or bridge is unavailable."
-      default:
-        status = .forbidden
-        message = "Access unavailable. Refresh or pair again."
-      }
-      return
-        (try? json(
-          ErrorResponse(
-            error: message, code: failure.map { String(describing: $0) } ?? "unavailable",
-            writeOutcome: writeFailure?.outcome ?? .unknown), status: status))
-        ?? response(.internalServerError, data: Data())
+    } catch { return failureResponse(error) }
+  }
+  private func validateEnvelope(_ request: Request) throws {
+    guard request.head.authority?.lowercased() == configuration.host,
+      header("Host", request) == nil,
+      header("X-Forwarded-Proto", request) == "https",
+      request.uri.query == nil
+    else { throw BridgeFailure.denied }
+    if let origin = header("Origin", request), origin != configuration.origin {
+      throw BridgeFailure.denied
     }
+    if request.method == .post {
+      guard header("Origin", request) == configuration.origin,
+        header("Content-Type", request)?.lowercased() == "application/json"
+      else { throw BridgeFailure.denied }
+    }
+  }
+  private struct EnvelopeMiddleware: RouterMiddleware {
+    typealias Context = BasicRequestContext
+    let server: BridgeServer
+    func handle(
+      _ request: Request, context: Context,
+      next: (Request, Context) async throws -> Response
+    ) async throws -> Response {
+      var result: Response
+      do {
+        try server.validateEnvelope(request)
+        result = try await next(request, context)
+      } catch let error as any HTTPResponseError {
+        result = try error.response(from: request, context: context)
+      } catch {
+        result = server.failureResponse(error)
+      }
+      for field in server.securityHeaders() { result.headers[field.name] = field.value }
+      return result
+    }
+  }
+  private func failureResponse(_ error: any Error) -> Response {
+    let status: HTTPResponse.Status
+    let message: String
+    let writeFailure = error as? WriteFailure
+    let failure = writeFailure?.failure ?? (error as? BridgeFailure)
+    switch failure ?? .denied {
+    case BridgeFailure.conflict:
+      status = .conflict
+      message = "This reminder changed. Refresh and review before trying again."
+    case BridgeFailure.invalid:
+      status = .badRequest
+      message = "Check the fields and confirmation."
+    case BridgeFailure.ambiguous:
+      status = .conflict
+      message =
+        "Result uncertain. Refresh and check Reminders. Do not repeat this operation blindly."
+    case BridgeFailure.tooLarge:
+      status = .contentTooLarge
+      message =
+        "This request exceeds its body limit (64 KiB for pairing/reads; 1 MiB for changes)."
+    case BridgeFailure.rateLimited:
+      status = .tooManyRequests
+      message = "Requests temporarily limited. Try later."
+    case BridgeFailure.unavailable:
+      status = .serviceUnavailable
+      message = "The store or bridge is unavailable."
+    default:
+      status = .forbidden
+      message = "Access unavailable. Refresh or pair again."
+    }
+    return
+      (try? json(
+        ErrorResponse(
+          error: message, code: failure.map { String(describing: $0) } ?? "unavailable",
+          writeOutcome: writeFailure?.outcome ?? .unknown), status: status))
+      ?? response(.internalServerError, data: Data())
   }
   private func decode<T: Decodable>(_ request: Request, limit: Int = 65_536) async throws -> T {
     let body: ByteBuffer
     do {
       body = try await request.body.collect(upTo: limit)
     } catch {
-      if limit == 1_048_576,
-        let error = error as? any HTTPResponseError, error.status == .contentTooLarge
-      {
+      if let error = error as? any HTTPResponseError, error.status == .contentTooLarge {
         throw BridgeFailure.tooLarge
       }
       throw error
@@ -212,9 +234,14 @@ public struct BridgeServer: Sendable {
   private func response(
     _ status: HTTPResponse.Status, data: Data, contentType: String = "application/json"
   ) -> Response {
+    var fields = securityHeaders()
+    fields[.contentType] = contentType
+    return Response(status: status, headers: fields, body: .init(byteBuffer: .init(bytes: data)))
+  }
+  private func securityHeaders() -> HTTPFields {
     var fields = HTTPFields()
     for (name, value) in [
-      ("Content-Type", contentType), ("Cache-Control", "no-store"),
+      ("Cache-Control", "no-store"),
       ("X-Content-Type-Options", "nosniff"),
       (
         "Content-Security-Policy",
@@ -222,6 +249,6 @@ public struct BridgeServer: Sendable {
       ),
       ("Referrer-Policy", "no-referrer"), ("X-Frame-Options", "DENY"),
     ] { fields[HTTPField.Name(name)!] = value }
-    return Response(status: status, headers: fields, body: .init(byteBuffer: .init(bytes: data)))
+    return fields
   }
 }

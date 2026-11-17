@@ -69,6 +69,7 @@ import Foundation
   public func pairClient(label: String, rights: ClientRights) throws -> (UUID, String) {
     prune()
     guard running, clients.count < 20, !label.isEmpty, label.count <= 80,
+      rights.read || (!rights.manage && !rights.delete),
       rights.lists.isSubset(of: Set(try inventory().map(\.id)))
     else { throw BridgeFailure.invalid }
     let id = UUID()

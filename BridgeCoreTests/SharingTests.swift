@@ -78,7 +78,7 @@ import Testing
     #expect(throws: BridgeFailure.denied) { try c.sharedLists(token) }
   }
   @Test func noReadWithoutReadGrant() async throws {
-    let (_, c, token, _) = try setup(read: false)
+    let (_, c, token, _) = try setup(read: false, manage: false, delete: false)
     await #expect(throws: BridgeFailure.denied) { try await c.read(token, list: "inbox") }
   }
   @Test func revokeDuringFetch() async throws {
