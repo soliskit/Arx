@@ -24,6 +24,7 @@ import Observation
   var connected = false
   var running = false
   var starting = false
+  var stopping = false
   let fixture: Bool
   private var generation = UUID()
   private var serverTask: Task<Void, Never>?
@@ -36,6 +37,10 @@ import Observation
     if fixture {
       connected = true
       refresh()
+      if ProcessInfo.processInfo.arguments.contains("--fixture-stopping") {
+        stopping = true
+        message = "Access revoked. Waiting for the local listener to stop."
+      }
     }
     observer = NotificationCenter.default.addObserver(
       forName: .EKEventStoreChanged, object: nil, queue: .main
@@ -69,7 +74,7 @@ import Observation
     }
   }
   func start() {
-    guard !running, !starting else { return }
+    guard !running, !starting, !stopping, serverTask == nil else { return }
     do {
       let config = try BridgeConfiguration(origin: origin, port: Int(port) ?? 0)
       try sharing.start()
@@ -83,14 +88,19 @@ import Observation
             await self?.listenerStarted(port: config.port, identity: identity)
           }
         } catch is CancellationError {} catch {
-          guard generation == identity else { return }
-          message =
-            "The local listener stopped or could not bind. Check the port and refresh. No wider network bind was attempted."
+          if generation == identity, !Task.isCancelled {
+            message =
+              "The local listener stopped or could not bind. Check the port and refresh. No wider network bind was attempted."
+          }
         }
         guard generation == identity else { return }
+        let wasStopping = stopping
         sharing.stop()
+        serverTask = nil
         running = false
         starting = false
+        stopping = false
+        if wasStopping { message = "Sharing stopped. Start the bridge to pair new clients." }
         clients = []
         pairingSecret = ""
       }
@@ -107,12 +117,17 @@ import Observation
     message = "Listening on 127.0.0.1:\(port). Remote HTTPS connectivity is not yet verified."
   }
   func stop() {
-    generation = UUID()
     sharing.stop()
-    serverTask?.cancel()
-    serverTask = nil
     running = false
     starting = false
+    // Cancellation begins teardown; only the listener task can finish it.
+    // Keeping the task blocks a replacement from racing its still-bound socket.
+    stopping = serverTask != nil
+    message =
+      stopping
+      ? "Access revoked. Waiting for the local listener to stop."
+      : "Sharing stopped. Start the bridge to pair new clients."
+    serverTask?.cancel()
     clients = []
     pairingSecret = ""
   }

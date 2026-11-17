@@ -6,6 +6,7 @@
 //
 
 import BridgeCore
+import Foundation
 import Testing
 
 @testable import Arx
@@ -112,5 +113,77 @@ struct ArxTests {
     #expect(model.pairingSecret.isEmpty)
     #expect(model.clients.isEmpty)
     #expect(!model.sharing.running)
+  }
+}
+
+@MainActor struct BridgeRestartTests {
+  private func waitUntil(_ condition: () -> Bool) async throws {
+    for _ in 0..<100 {
+      if condition() { return }
+      try await Task.sleep(for: .milliseconds(50))
+    }
+    try #require(condition(), "Fixture listener did not settle")
+  }
+  @Test func stopWhileStartingBlocksReplacementUntilTaskFinishes() async throws {
+    let model = BridgeViewModel(fixture: true)
+    model.origin = "https://bridge.example.com"
+    model.port = String(Int.random(in: 20000...60000))
+    model.start()
+    #expect(model.starting)
+    model.stop()
+    #expect(model.stopping)
+    #expect(!model.running && !model.starting && !model.sharing.running)
+    model.start()
+    #expect(model.stopping && !model.starting && !model.sharing.running)
+    // No actor suspension happened between Start/Stop/Start above.
+    try await waitUntil { !model.stopping }
+    #expect(!model.running && !model.starting)
+    model.start()
+    do {
+      try await waitUntil { model.running || !model.starting }
+      try #require(model.running)
+    } catch {
+      model.stop()
+      try? await waitUntil { !model.stopping }
+      throw error
+    }
+    model.stop()
+    try await waitUntil { !model.stopping }
+  }
+  @Test func repeatedRestartRevokesOldCredentialsAndClearsStopping() async throws {
+    let model = BridgeViewModel(fixture: true)
+    model.origin = "https://bridge.example.com"
+    model.port = String(Int.random(in: 20000...60000))
+    for _ in 0..<2 {
+      model.start()
+      do {
+        try await waitUntil { model.running || !model.starting }
+        try #require(model.running)
+        let (_, secret) = try model.sharing.pairClient(label: "Fixture", rights: ClientRights())
+        let session = try model.sharing.exchange(secret)
+        let (_, unused) = try model.sharing.pairClient(
+          label: "Pending fixture", rights: ClientRights())
+        model.stop()
+        model.stop()
+        #expect(model.stopping)
+        #expect(!model.sharing.running)
+        #expect(model.clients.isEmpty && model.pairingSecret.isEmpty)
+        #expect(throws: BridgeFailure.denied) { try model.sharing.sessionState(session.token) }
+        model.start()
+        #expect(!model.starting && !model.running && model.stopping)
+        try await waitUntil { !model.stopping }
+        model.start()
+        try await waitUntil { model.running || !model.starting }
+        try #require(model.running)
+        #expect(throws: BridgeFailure.denied) { try model.sharing.sessionState(session.token) }
+        #expect(throws: BridgeFailure.denied) { try model.sharing.exchange(unused) }
+      } catch {
+        model.stop()
+        try? await waitUntil { !model.stopping }
+        throw error
+      }
+      model.stop()
+      try await waitUntil { !model.stopping }
+    }
   }
 }

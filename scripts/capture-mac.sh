@@ -202,3 +202,18 @@ osascript -e 'tell application "System Events" to tell process "Arx" to get enti
 capture diagnostic
 
 bash scripts/check-window-lifetime.sh "${APP}" "${PID}"
+
+# Frozen visual fixture only; no listener or EventKit adapter is constructed.
+"${APP}/Contents/MacOS/Arx" --bridge-fixtures --fixture-stopping >fixture-stopping.log 2>&1 &
+PID=$!
+BOUNDS=
+for _ in $(seq 1 30); do
+  BOUNDS=$(osascript -e 'tell application "System Events" to tell process "Arx" to get (position of window 1) & (size of window 1)' 2>/dev/null || true)
+  [[ -n "${BOUNDS}" ]] && break
+  sleep 1
+done
+[[ -n "${BOUNDS}" ]] || { echo "No stopping fixture window"; exit 1; }
+# Do not use the checkbox sequence here: this fixture exists only for this state.
+osascript -e 'tell application "System Events" to tell process "Arx" to set size of window 1 to {1200, 650}'
+sleep 1
+capture stopping

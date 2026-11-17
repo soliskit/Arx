@@ -1,4 +1,4 @@
-// Fixture-only lifecycle qualification. Records restart behavior; does not change socket policy.
+// Fixture-only lifecycle regression. Never constructs an EventKit adapter.
 import Foundation
 import HTTPTypes
 import Hummingbird
@@ -13,10 +13,10 @@ import Testing
 }
 @MainActor struct ListenerQualificationTests {
   private func launch(_ port: Int) throws -> (Task<Void, Never>, ListenerState, SharingController) {
-    let c = SharingController(store: FixtureStore())
-    try c.start()
+    let sharing = SharingController(store: FixtureStore())
+    try sharing.start()
     let server = BridgeServer(
-      sharing: c, configuration: try .init(origin: "https://bridge.example.com", port: port))
+      sharing: sharing, configuration: try .init(origin: "https://bridge.example.com", port: port))
     let state = ListenerState()
     let task = Task { @MainActor in
       do {
@@ -24,20 +24,26 @@ import Testing
         state.result = "returned"
       } catch { state.result = String(describing: error) }
     }
-    return (task, state, c)
+    return (task, state, sharing)
   }
   private func settle(_ state: ListenerState) async throws {
     for _ in 0..<100 where !state.ready && state.result == nil {
       try await Task.sleep(for: .milliseconds(50))
     }
   }
-  @Test func recordsOpenConnectionRestartAndRequiresExclusivePort() async throws {
-    // Fresh random port avoids contaminating another test with Linux TIME_WAIT.
+  private func headers() -> HTTPFields {
+    var fields = HTTPFields()
+    fields[HTTPField.Name("X-Forwarded-Proto")!] = "https"
+    return fields
+  }
+  @Test(arguments: ["no-client", "closed-client", "open-client"])
+  func restartSucceedsAndLivePortStaysExclusive(connection: String) async throws {
     let port = Int.random(in: 20000...60000)
     let (first, firstState, firstSharing) = try launch(port)
+    var client: TestClient?
     do {
       try await settle(firstState)
-      try #require(firstState.ready, "Qualification listener did not start")
+      try #require(firstState.ready, "Fixture listener did not start")
       let (second, secondState, secondSharing) = try launch(port)
       do {
         try await settle(secondState)
@@ -52,49 +58,51 @@ import Testing
       second.cancel()
       await second.value
       secondSharing.stop()
-      let client = TestClient(host: "127.0.0.1", port: port)
-      client.connect()
-      do {
-        var headers = HTTPFields()
-        headers[HTTPField.Name("X-Forwarded-Proto")!] = "https"
-        let response = try await client.execute(
-          .init("/", method: .get, authority: "bridge.example.com", headers: headers, body: nil))
+      if connection != "no-client" {
+        let opened = TestClient(host: "127.0.0.1", port: port)
+        client = opened
+        opened.connect()
+        let response = try await opened.execute(
+          .init(
+            "/", method: .get, authority: "bridge.example.com", headers: headers(), body: nil))
         #expect(response.status == .ok)
-        // Stop with the keep-alive connection open, as in the reported failure.
-        first.cancel()
-        await first.value
-        firstSharing.stop()
-      } catch {
-        try? await client.shutdown()
-        throw error
+        if connection == "closed-client" {
+          try await opened.shutdown()
+          client = nil
+        }
       }
-      try? await client.shutdown()
+      firstSharing.stop()
+      first.cancel()
+      await first.value
+      // For open-client, leave the client object alive through the next bind.
       let (restart, restartState, restartSharing) = try launch(port)
       do {
         try await settle(restartState)
-        let addressBusy = restartState.result?.contains("Address already in use") == true
-        #expect(restartState.ready || addressBusy)
-        print(
-          "LISTENER QUALIFICATION: exclusive bind refused; immediate open-client restart="
-            + (restartState.ready ? "ready" : "address-in-use; NOT FIXED")
-            + "; reuseAddress remains false; fixture only")
+        try #require(
+          restartState.ready, "Same-port restart must succeed, not accept address-in-use")
+        try await TestClient.withClient(host: "127.0.0.1", port: port) { fresh in
+          let response = try await fresh.execute(
+            .init(
+              "/", method: .get, authority: "bridge.example.com", headers: headers(), body: nil))
+          #expect(response.status == .ok)
+        }
       } catch {
         restart.cancel()
         await restart.value
         restartSharing.stop()
         throw error
       }
+      restartSharing.stop()
       restart.cancel()
       await restart.value
-      restartSharing.stop()
+      if let client { try? await client.shutdown() }
+      print("LISTENER REGRESSION: \(connection) restart ready; duplicate live listener refused")
     } catch {
+      firstSharing.stop()
       first.cancel()
       await first.value
-      firstSharing.stop()
+      if let client { try? await client.shutdown() }
       throw error
     }
-    first.cancel()
-    await first.value
-    firstSharing.stop()
   }
 }

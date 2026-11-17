@@ -77,7 +77,7 @@ Mutation operation IDs limit duplicate application within a session. Do not blin
 ## Stop and revoke
 
 - **Revoke** removes one client's grant/session.
-- **Stop all sharing** cancels the listener and clears all grants/sessions.
+- **Stop all sharing** immediately clears all grants/sessions and begins listener shutdown. Start stays disabled as **Stopping listener** until teardown finishes. The next start uses the same loopback port without restoring old clients. A second active listener must still be refused.
 - Control-C stops the foreground connector. That does not revoke the app's macOS permission.
 - Remove a route separately if you no longer want that hostname mapped. Stopping the connector does not delete DNS.
 - Revoke Reminders access separately in macOS privacy settings if desired.
