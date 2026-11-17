@@ -9,7 +9,7 @@ import BridgeCore
 import SwiftUI
 
 struct ContentView: View {
-  @State private var model = BridgeViewModel()
+  let model: BridgeViewModel
   @State private var highlighted: String?
   var body: some View {
     @Bindable var model = model
@@ -134,4 +134,4 @@ struct ContentView: View {
   }
 }
 
-#Preview { ContentView() }
+#Preview { ContentView(model: BridgeViewModel(fixture: true)) }
