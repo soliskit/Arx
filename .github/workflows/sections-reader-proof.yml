@@ -1,0 +1,28 @@
+name: Sections reader synthetic proof
+
+on:
+  pull_request:
+    types: [opened]
+
+permissions:
+  contents: read
+
+jobs:
+  compile-and-fixtures:
+    runs-on: xcode-27
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile native candidate without executing it
+        run: |
+          set -euo pipefail
+          cd experiments/sections-reader
+          xcrun clang -fobjc-arc -Wall -Wextra -Werror -c SectionReader.m -o "$RUNNER_TEMP/SectionReader.o"
+      - name: Compile and run synthetic providers only
+        run: |
+          set -euo pipefail
+          cd experiments/sections-reader
+          xcrun clang -std=c11 -Wall -Wextra -Werror gates-test.c -o "$RUNNER_TEMP/section-gates"
+          "$RUNNER_TEMP/section-gates"
+          xcrun clang -fobjc-arc -Wall -Wextra -Werror -DARX_SECTION_READER_FIXTURES=1 -framework Foundation SectionReader.m FixtureTests.m -o "$RUNNER_TEMP/section-fixtures"
+          "$RUNNER_TEMP/section-fixtures"
