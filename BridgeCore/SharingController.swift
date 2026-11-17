@@ -31,9 +31,19 @@ import Foundation
   private var clients: [UUID: Client] = [:]
   private var failedPairings: [Date] = []
   private let clock: @Sendable () -> Date
-  public init(store: any ReminderStore, clock: @escaping @Sendable () -> Date = { Date() }) {
+  private let credentialDigest: (String) -> String
+  public convenience init(
+    store: any ReminderStore, clock: @escaping @Sendable () -> Date = { Date() }
+  ) {
+    self.init(store: store, clock: clock, credentialDigest: Self.digest)
+  }
+  init(
+    store: any ReminderStore, clock: @escaping @Sendable () -> Date = { Date() },
+    credentialDigest: @escaping (String) -> String
+  ) {
     self.store = store
     self.clock = clock
+    self.credentialDigest = credentialDigest
   }
   public var clientInfo: [ClientInfo] {
     prune()
@@ -76,9 +86,10 @@ import Foundation
     let now = clock()
     failedPairings.removeAll { now.timeIntervalSince($0) > 60 }
     // A correct secret is never refused because strangers guessed wrongly first.
-    guard secret.utf8.count <= 128,
+    let presented = secret.utf8.count <= 128 ? credentialDigest(secret) : nil
+    guard let presented,
       let id = clients.first(where: {
-        $0.value.pairingHash == Self.digest(secret) && $0.value.pairingExpiry > now
+        $0.value.pairingHash == presented && $0.value.pairingExpiry > now
       })?.key, var client = clients[id]
     else {
       guard failedPairings.count < 10 else { throw BridgeFailure.rateLimited }
@@ -111,8 +122,9 @@ import Foundation
       throw BridgeFailure.denied
     }
     let now = clock()
-    guard token.utf8.count <= 128,
-      let id = clients.first(where: { $0.value.sessionHash == Self.digest(token) })?.key,
+    guard token.utf8.count <= 128 else { throw BridgeFailure.denied }
+    let presented = credentialDigest(token)
+    guard let id = clients.first(where: { $0.value.sessionHash == presented })?.key,
       var client = clients[id], let issued = client.issued, let seen = client.lastSeen,
       now.timeIntervalSince(issued) < 86_400, now.timeIntervalSince(seen) < 1800,
       csrf == nil || csrf == client.csrf
@@ -296,7 +308,7 @@ import Foundation
       String(format: "%02x", UInt8.random(in: .min ... .max, using: &random))
     }.joined()
   }
-  private static func digest(_ value: String) -> String {
+  static func digest(_ value: String) -> String {
     SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
   }
 }
