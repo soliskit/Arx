@@ -50,6 +50,9 @@ function clear() {
   editing = null;
   el("workspace").hidden = true;
   el("editor").hidden = true;
+  el("edit-form").reset();
+  el("list-title").textContent = "Choose a list";
+  el("advanced-warning").textContent = "";
   el("pairing").hidden = false;
   el("secret").value = "";
   el("lists").replaceChildren();
@@ -467,9 +470,7 @@ el("edit-form").addEventListener("submit", (event) => {
 });
 setInterval(() => {
   if (rights && !busy) {
-    run(async () => {
-      await api("/api/session");
-    });
+    api("/api/session").catch(() => {});
   }
 }, 30000);
 run(async () => {
