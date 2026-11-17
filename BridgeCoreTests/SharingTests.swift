@@ -193,7 +193,9 @@ import Testing
     #expect(store.rows.count == 3)
     var changed = command
     changed.fields = .init(title: "Different")
-    #expect(throws: BridgeFailure.conflict) { try c.mutate(token, csrf: csrf, command: changed) }
+    #expect(throws: WriteFailure(.conflict, outcome: .committed)) {
+      try c.mutate(token, csrf: csrf, command: changed)
+    }
   }
   @Test func allBasicMutations() throws {
     let (store, c, token, csrf) = try setup()
@@ -263,7 +265,7 @@ import Testing
         command: .init(action: .edit, listID: "inbox", itemID: "book", base: base, fields: fields)))
     #expect(result.fields.repeats == base.fields.repeats)
     fields.repeats[0].interval = 2
-    #expect(throws: BridgeFailure.invalid) {
+    #expect(throws: WriteFailure(.invalid, outcome: .refused)) {
       try c.mutate(
         token, csrf: csrf,
         command: .init(action: .edit, listID: "inbox", itemID: "book", base: result, fields: fields)
@@ -275,8 +277,10 @@ import Testing
     let item = try store.current("book")
     let command = Mutation(
       action: .delete, listID: "inbox", itemID: "book", base: item, confirmation: item.fields.title)
-    #expect(throws: BridgeFailure.denied) { try c.mutate(token, csrf: csrf, command: command) }
-    #expect(throws: BridgeFailure.denied) {
+    #expect(throws: WriteFailure(.denied, outcome: .refused)) {
+      try c.mutate(token, csrf: csrf, command: command)
+    }
+    #expect(throws: WriteFailure(.denied, outcome: .unknown)) {
       try c.mutate(
         token, csrf: "wrong",
         command: .init(action: .create, listID: "inbox", fields: .init(title: "Bad")))
@@ -286,7 +290,7 @@ import Testing
   @Test func deleteConfirmationRequired() throws {
     let (store, c, token, csrf) = try setup()
     let item = try store.current("book")
-    #expect(throws: BridgeFailure.invalid) {
+    #expect(throws: WriteFailure(.invalid, outcome: .refused)) {
       try c.mutate(
         token, csrf: csrf,
         command: .init(
@@ -297,14 +301,14 @@ import Testing
   @Test func writableBothEndsAndNoManage() throws {
     let (store, c, token, csrf) = try setup(lists: ["inbox", "readonly"])
     let item = try store.current("book")
-    #expect(throws: BridgeFailure.denied) {
+    #expect(throws: WriteFailure(.denied, outcome: .refused)) {
       try c.mutate(
         token, csrf: csrf,
         command: .init(
           action: .move, listID: "inbox", itemID: "book", base: item, destination: "readonly"))
     }
     let (_, readonly, t, s) = try setup(manage: false)
-    #expect(throws: BridgeFailure.denied) {
+    #expect(throws: WriteFailure(.denied, outcome: .refused)) {
       try readonly.mutate(
         t, csrf: s, command: .init(action: .create, listID: "inbox", fields: .init(title: "No")))
     }
@@ -313,7 +317,7 @@ import Testing
     let (store, c, token, csrf) = try setup()
     let base = try store.current("book")
     store.rows["book"]!.fields.notes = "External edit"
-    #expect(throws: BridgeFailure.conflict) {
+    #expect(throws: WriteFailure(.conflict, outcome: .refused)) {
       try c.mutate(
         token, csrf: csrf,
         command: .init(
@@ -322,7 +326,7 @@ import Testing
     }
     store.rows.removeValue(forKey: "book")
     store.rows["new-id"] = .init(id: "new-id", listID: "inbox", fields: base.fields)
-    #expect(throws: BridgeFailure.denied) {
+    #expect(throws: WriteFailure(.denied, outcome: .refused)) {
       try c.mutate(
         token, csrf: csrf,
         command: .init(
@@ -350,12 +354,14 @@ import Testing
     let command = Mutation(action: .create, listID: "inbox", fields: .init(title: "Replay fixture"))
     let created = try #require(try c.mutate(token, csrf: csrf, command: command))
     store.rows[created.id]!.listID = "weekend"
-    #expect(throws: BridgeFailure.denied) { try c.mutate(token, csrf: csrf, command: command) }
+    #expect(throws: WriteFailure(.denied, outcome: .committed)) {
+      try c.mutate(token, csrf: csrf, command: command)
+    }
   }
   @Test func rejectedCommandsDoNotConsumeUncertainStorage() throws {
     let (_, c, token, csrf) = try setup()
     for _ in 0..<600 {
-      #expect(throws: BridgeFailure.denied) {
+      #expect(throws: WriteFailure(.denied, outcome: .refused)) {
         try c.mutate(token, csrf: csrf, command: .init(action: .edit, listID: "inbox"))
       }
     }

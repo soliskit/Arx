@@ -77,11 +77,11 @@ import Testing
     let command = Mutation(
       action: .create, listID: "inbox", fields: .init(title: "Uncertain fixture"))
     let before = store.fixture.rows.count
-    #expect(throws: BridgeFailure.ambiguous) {
+    #expect(throws: WriteFailure(.ambiguous, outcome: .unknown)) {
       try controller.mutate(state.token, csrf: state.csrf, command: command)
     }
     #expect(store.fixture.rows.count == before + 1)
-    #expect(throws: BridgeFailure.ambiguous) {
+    #expect(throws: WriteFailure(.ambiguous, outcome: .unknown)) {
       try controller.mutate(state.token, csrf: state.csrf, command: command)
     }
     #expect(store.fixture.rows.count == before + 1)
@@ -103,8 +103,11 @@ import Testing
     let controller = SharingController(store: store)
     try controller.start()
     let state = try controller.exchange(grant(controller))
-    for _ in 0..<510 {
-      #expect(throws: BridgeFailure.ambiguous) {
+    for index in 0..<510 {
+      #expect(
+        throws: WriteFailure(
+          index < 500 ? .ambiguous : .rateLimited, outcome: index < 500 ? .unknown : .refused)
+      ) {
         try controller.mutate(
           state.token, csrf: state.csrf,
           command: .init(

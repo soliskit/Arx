@@ -41,10 +41,13 @@ import Foundation
   }
   func current(_ id: String) throws -> SharedReminder { snapshot(try object(id)) }
   func create(in list: String, fields: ReminderFields) throws -> SharedReminder {
-    let destination = try writable(list)
-    let item = EKReminder(eventStore: store)
-    item.calendar = destination
-    try apply(fields, to: item, preserving: nil)
+    let item = try Self.precommit {
+      let destination = try writable(list)
+      let item = EKReminder(eventStore: store)
+      item.calendar = destination
+      try apply(fields, to: item, preserving: nil)
+      return item
+    }
     do {
       try store.save(item, commit: true)
     } catch {
@@ -54,11 +57,19 @@ import Foundation
     return snapshot(item)
   }
   func save(_ updated: SharedReminder, replacing base: SharedReminder) throws -> SharedReminder {
-    let item = try object(base.id)
-    guard snapshot(item) == base else { throw BridgeFailure.conflict }
-    _ = try writable(base.listID)
-    let destination = try writable(updated.listID)
-    try apply(updated.fields, to: item, preserving: base)
+    let (item, destination) = try Self.precommit {
+      let item = try object(base.id)
+      do {
+        guard snapshot(item) == base else { throw BridgeFailure.conflict }
+        _ = try writable(base.listID)
+        let destination = try writable(updated.listID)
+        try apply(updated.fields, to: item, preserving: base)
+        return (item, destination)
+      } catch {
+        item.reset()
+        throw error
+      }
+    }
     do {
       item.calendar = destination
       try store.save(item, commit: true)
@@ -69,12 +80,21 @@ import Foundation
     return snapshot(item)
   }
   func remove(_ reminder: SharedReminder) throws {
-    let item = try object(reminder.id)
-    guard snapshot(item) == reminder else { throw BridgeFailure.conflict }
-    _ = try writable(reminder.listID)
+    let item = try Self.precommit {
+      let item = try object(reminder.id)
+      guard snapshot(item) == reminder else { throw BridgeFailure.conflict }
+      _ = try writable(reminder.listID)
+      return item
+    }
     do { try store.remove(item, commit: true) } catch { throw BridgeFailure.ambiguous }
     guard store.calendarItem(withIdentifier: reminder.id) == nil else {
       throw BridgeFailure.ambiguous
+    }
+  }
+  /// The supplied closure must contain preparation only, never save/remove/commit.
+  static func precommit<T>(_ prepare: () throws -> T) throws -> T {
+    do { return try prepare() } catch {
+      throw PrecommitRefusal(error as? BridgeFailure ?? .unavailable)
     }
   }
   private func access() throws { guard authorized else { throw BridgeFailure.unavailable } }

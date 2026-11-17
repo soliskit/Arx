@@ -93,6 +93,16 @@ async function api(path, body) {
       "X-CSRF-Token": csrf,
     };
     options.body = JSON.stringify(body);
+    if (
+      path === "/api/mutate" &&
+      new TextEncoder().encode(options.body).byteLength > 1_048_576
+    ) {
+      const failure = Error(
+        "This reminder request exceeds 1 MiB, including its original copy. Shorten the notes.",
+      );
+      failure.writeOutcome = "refused"; // Nothing was sent for this new operation ID.
+      throw failure;
+    }
   }
   const response = await fetch(path, options);
   let result;
@@ -129,6 +139,7 @@ async function api(path, body) {
     }
     const failure = Error(message);
     failure.status = response.status;
+    failure.writeOutcome = result?.writeOutcome;
     throw failure;
   }
   if (path === "/api/session" && !validSession(result)) {
@@ -237,20 +248,23 @@ async function mutate(action, item, extra, reload) {
     result = await api("/api/mutate", command);
   } catch (error) {
     el("editor").hidden = true;
-    // 400 and 429 are refused before the store is touched. Anything else may have been saved.
-    const refused = error.status === 400 || error.status === 429;
-    if (!refused) {
+    const refused = error.writeOutcome === "refused";
+    const committed = error.writeOutcome === "committed";
+    if (!refused && !committed) {
       uncertainWrites.push({
         at: new Date().toLocaleTimeString(),
         action,
         message: error.message,
       });
     }
-    setStatus(
-      refused
-        ? `${error.message} Nothing was changed.`
-        : `${error.message} This ${action} may or may not have been saved. Check Reminders before repeating it.`,
-    );
+    let message = `${error.message} This ${action} may or may not have been saved. Check Reminders before repeating it.`;
+    if (refused) {
+      message = `${error.message} Nothing was changed.`;
+    }
+    if (committed) {
+      message = `Change saved, but the result could not be reloaded: ${error.message}`;
+    }
+    setStatus(message);
     error.reported = true;
     throw error;
   }
