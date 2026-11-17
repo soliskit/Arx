@@ -69,7 +69,7 @@ import Testing
           command: .init(action: .create, listID: "inbox", fields: .init(title: "Fill cap")))
       }
     }
-    #expect(throws: WriteFailure(.rateLimited, outcome: .refused)) {
+    #expect(throws: WriteFailure(.sessionFull, outcome: .refused)) {
       try c.mutate(
         token, csrf: csrf,
         command: .init(action: .create, listID: "inbox", fields: .init(title: "Over cap")))

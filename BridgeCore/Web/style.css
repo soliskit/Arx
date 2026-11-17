@@ -66,7 +66,7 @@ select {
   display: block;
   width: 100%;
   padding: 10px;
-  border: 1px solid #aeb9c5;
+  border: 1px solid #7e8c9d;
   border-radius: 7px;
   background: transparent;
   color: inherit;
@@ -81,7 +81,7 @@ textarea {
 
 button {
   font: inherit;
-  border: 1px solid #aeb9c5;
+  border: 1px solid #7e8c9d;
   border-radius: 7px;
   padding: 8px 13px;
   background: #edf2f8;
@@ -101,6 +101,35 @@ button:disabled {
 button.danger {
   color: #a41523;
   background: #fff1f1;
+}
+
+.error {
+  color: #a41523;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(17 21 27 / 40%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.dialog-backdrop > div {
+  background: #fff;
+  border: 1px solid #dbe0e7;
+  border-radius: 14px;
+  padding: 18px;
+  max-width: 420px;
+  width: 100%;
+}
+
+.delete-context {
+  border-left: 3px solid #dbe0e7;
+  padding-left: 10px;
+  margin-bottom: 12px;
 }
 
 button.selected {
@@ -224,11 +253,24 @@ summary {
     color: #ffb7bf;
   }
 
+  .error {
+    color: #ffb7bf;
+  }
+
   button.selected {
     background: #365c8d;
   }
 
   .reminder {
     border-color: #364354;
+  }
+
+  .dialog-backdrop > div {
+    background: #1c232d;
+    border-color: #364354;
+  }
+
+  .delete-context {
+    border-left-color: #364354;
   }
 }

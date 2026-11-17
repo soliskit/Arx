@@ -352,6 +352,12 @@ try {
   await until(
     '!busy && document.getElementById("reminders").textContent.includes("Return the library book")',
   );
+  // Every card action button names its reminder (#27).
+  assert.ok(
+    await evaluate(
+      '[...document.querySelectorAll("#reminders article")].every(a=>{const t=a.querySelector("h3").textContent.replace(/^\u2713 /,"");return [...a.querySelectorAll(".actions button")].every(b=>(b.getAttribute("aria-label")||"").endsWith(" "+t));})',
+    ),
+  );
   // Use the app's own UI to create, edit, complete/reopen and delete fixture data.
   await evaluate('document.getElementById("new").click()');
   await until('!busy && !document.getElementById("editor").hidden');
@@ -378,6 +384,10 @@ try {
   await until(
     'document.getElementById("reminders").textContent.includes("Edited fixture notes")',
   );
+  assert.equal(
+    await evaluate("document.activeElement?.dataset?.action"),
+    "edit",
+  );
   const clickAction = async (label) => {
     await enabled();
     return evaluate(
@@ -399,22 +409,109 @@ try {
     'document.getElementById("reminders").textContent.includes("Edited fixture notes")',
   );
   await screenshot("05-moved-fixture");
+  // A refused save keeps the editor open with the entered values and the reason (#24).
+  await clickAction("Edit");
+  await until('!document.getElementById("editor").hidden');
+  await evaluate(
+    'document.getElementById("due-date").value="2027-01-15";document.getElementById("due-time").value="09:00";document.getElementById("timezone").value="Mars/Olympus_Mons";document.getElementById("edit-form").requestSubmit()',
+  );
+  await until(
+    'document.getElementById("editor-error") && !document.getElementById("editor-error").hidden',
+  );
+  assert.equal(
+    await evaluate('document.getElementById("editor").hidden'),
+    false,
+  );
+  assert.equal(
+    await evaluate('document.getElementById("title").value'),
+    "<img src=x onerror=alert(1)>",
+  );
+  assert.match(
+    await evaluate('document.getElementById("editor-error").textContent'),
+    /Nothing was changed/,
+  );
+  await screenshot("06-refused-keeps-editor");
+  await evaluate('document.getElementById("cancel-edit").click()');
+  await until('document.getElementById("editor").hidden');
+  assert.equal(
+    await evaluate("document.activeElement?.dataset?.action"),
+    "edit",
+  );
   const dialogs = [];
   ws.addEventListener("message", (event) => {
     const m = JSON.parse(event.data);
     if (m.method === "Page.javascriptDialogOpening") {
       dialogs.push(m.params.type);
-      send("Page.handleJavaScriptDialog", {
-        accept: true,
-        promptText: "<img src=x onerror=alert(1)>",
-      });
+      send("Page.handleJavaScriptDialog", { accept: false });
     }
   });
   await clickAction("Delete");
+  await until('document.querySelector(".dialog-backdrop")');
+  // The backdrop covers the live viewport (full-page captures clip fixed layers).
+  const cover = await evaluate(
+    '(()=>{const r=document.querySelector(".dialog-backdrop").getBoundingClientRect();return {top:r.top,left:r.left,w:r.width,h:r.height,iw:innerWidth,ih:innerHeight};})()',
+  );
+  assert.equal(cover.top, 0);
+  assert.equal(cover.left, 0);
+  assert.ok(cover.h >= cover.ih, JSON.stringify(cover));
+  // A fixed layer stops at the classic scrollbar track; the strip is browser chrome.
+  assert.ok(cover.w >= cover.iw - 20, JSON.stringify(cover));
+  await screenshot("07-delete-confirmation");
+  // A mistyped confirmation explains itself and deletes nothing (#26).
+  await evaluate(
+    'document.getElementById("delete-confirmation").value="Wrong title"',
+  );
+  await evaluate(
+    '[...document.querySelectorAll(".dialog-backdrop button")].find(b=>b.textContent==="Delete reminder").click()',
+  );
+  await until(
+    'document.querySelector(".dialog-backdrop .error") && !document.querySelector(".dialog-backdrop .error").hidden',
+  );
+  await screenshot("08-delete-mismatch");
+  assert.ok(
+    await evaluate(
+      'document.getElementById("reminders").textContent.includes("Edited fixture notes")',
+    ),
+  );
+  // The page behind the modal is inert, Tab wraps inside it, and Cancel
+  // returns focus to the Delete button that opened it (#26/#27).
+  assert.equal(await evaluate('document.querySelector("main").inert'), true);
+  await evaluate(
+    '(()=>{const b=[...document.querySelectorAll(".dialog-backdrop button")];b.at(-1).focus();document.querySelector(".dialog-backdrop").dispatchEvent(new KeyboardEvent("keydown",{key:"Tab",bubbles:true}));})()',
+  );
+  assert.equal(
+    await evaluate("document.activeElement?.id"),
+    "delete-confirmation",
+  );
+  await evaluate(
+    'document.querySelector(".dialog-backdrop").dispatchEvent(new KeyboardEvent("keydown",{key:"Tab",shiftKey:true,bubbles:true}))',
+  );
+  assert.equal(
+    await evaluate("document.activeElement?.textContent"),
+    "Delete reminder",
+  );
+  await evaluate(
+    '[...document.querySelectorAll(".dialog-backdrop button")].find(b=>b.textContent==="Cancel").click()',
+  );
+  assert.equal(await evaluate('document.querySelector("main").inert'), false);
+  assert.equal(
+    await evaluate("document.activeElement?.dataset?.action"),
+    "delete",
+  );
+  // The exact title confirms; the textarea represents any title, line breaks included.
+  await clickAction("Delete");
+  await until('document.querySelector(".dialog-backdrop")');
+  await evaluate(
+    `document.getElementById("delete-confirmation").value=${JSON.stringify("<img src=x onerror=alert(1)>")}`,
+  );
+  await evaluate(
+    '[...document.querySelectorAll(".dialog-backdrop button")].find(b=>b.textContent==="Delete reminder").click()',
+  );
   await until(
     '!document.getElementById("reminders").textContent.includes("Edited fixture notes")',
   );
-  assert.deepEqual(dialogs, ["confirm", "prompt"]);
+  assert.equal(await evaluate("document.activeElement?.id"), "new");
+  assert.deepEqual(dialogs, []);
   await checkBrowserInput({ evaluate, until, send, screenshot });
   await checkBrowserEdits({ evaluate, until, screenshot });
   await checkBrowserOutcomes({ evaluate, until, screenshot });

@@ -266,8 +266,9 @@ import Foundation
       }
       outcome = .refused
       _ = try require(id, list: command.listID, action: command.action)
+      // The replay record is never evicted: a session past the cap must pair again.
       guard clients[id]!.operations.count + clients[id]!.uncertain.count < 500 else {
-        throw BridgeFailure.rateLimited
+        throw BridgeFailure.sessionFull
       }
       if let fields = command.fields {
         var basic = fields

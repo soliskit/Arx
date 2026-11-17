@@ -144,6 +144,7 @@ async function api(path, body) {
     }
     const failure = Error(message);
     failure.status = response.status;
+    failure.code = result?.code;
     failure.writeOutcome = result?.writeOutcome;
     throw failure;
   }
@@ -214,8 +215,151 @@ function dateValue(name, original) {
   }
   return value;
 }
+let editorReturnFocus = null;
+let lastInvoker = null;
+let focusAfterRerender = false;
+function editorError(message) {
+  let line = el("editor-error");
+  if (!line) {
+    line = document.createElement("p");
+    line.id = "editor-error";
+    line.className = "error";
+    line.setAttribute("role", "alert");
+    el("save").insertAdjacentElement("beforebegin", line);
+  }
+  line.textContent = message || "";
+  line.hidden = !message;
+}
+function restoreEditorFocus() {
+  const target = editorReturnFocus?.itemId
+    ? document.querySelector(
+        `button[data-item-id="${CSS.escape(editorReturnFocus.itemId)}"][data-action="${editorReturnFocus.action}"]`,
+      )
+    : null;
+  const button = target || el("new");
+  // The click's busy pass disabled every button; this one is moments from re-enabling.
+  button.disabled = false;
+  button.focus();
+}
+function confirmDelete(item) {
+  return new Promise((resolve) => {
+    const title = item.fields.title;
+    editorReturnFocus = lastInvoker?.dataset?.itemId
+      ? {
+          itemId: lastInvoker.dataset.itemId,
+          action: lastInvoker.dataset.action,
+        }
+      : {};
+    const overlay = document.createElement("div");
+    overlay.className = "dialog-backdrop";
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "delete-heading");
+    const heading = text("h2", "Delete this reminder?");
+    heading.id = "delete-heading";
+    dialog.append(heading);
+    const context = document.createElement("div");
+    context.className = "delete-context";
+    context.append(text("h3", title));
+    if (item.fields.due) {
+      context.append(
+        text(
+          "p",
+          `Due: ${formatDate(item.fields.due)}${item.fields.due.hour === undefined ? "" : ` ${formatTime(item.fields.due)}`}`,
+        ),
+      );
+    }
+    if (item.fields.notes) {
+      context.append(text("p", item.fields.notes));
+    }
+    dialog.append(context);
+    if (item.fields.repeats.length) {
+      const note = text(
+        "p",
+        "This reminder repeats. EventKit controls the resulting recurrence behavior; review Reminders afterward.",
+      );
+      note.className = "hint";
+      dialog.append(note);
+    }
+    const label = text(
+      "label",
+      "Type the reminder title exactly to confirm deletion.",
+    );
+    label.setAttribute("for", "delete-confirmation");
+    dialog.append(label);
+    const input = document.createElement("textarea");
+    input.id = "delete-confirmation";
+    input.rows = 2;
+    input.autocomplete = "off";
+    dialog.append(input);
+    const error = text("p", "");
+    error.className = "error";
+    error.setAttribute("role", "alert");
+    error.hidden = true;
+    dialog.append(error);
+    const buttons = document.createElement("div");
+    buttons.className = "actions";
+    const cancel = text("button", "Cancel");
+    cancel.type = "button";
+    const confirm = text("button", "Delete reminder");
+    confirm.type = "button";
+    confirm.className = "danger";
+    buttons.append(cancel, confirm);
+    dialog.append(buttons);
+    overlay.append(dialog);
+    const close = (value) => {
+      for (const sibling of document.body.children) {
+        sibling.inert = false;
+      }
+      overlay.remove();
+      restoreEditorFocus();
+      // A confirmed delete rerenders the list; restore again once it lands.
+      focusAfterRerender = value !== null;
+      resolve(value);
+    };
+    cancel.addEventListener("click", () => close(null));
+    overlay.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        close(null);
+        return;
+      }
+      if (event.key === "Tab") {
+        const focusable = [...dialog.querySelectorAll("textarea, button")];
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    });
+    confirm.addEventListener("click", () => {
+      if (input.value === title) {
+        close(input.value);
+      } else {
+        error.textContent = "The title does not match. Nothing was deleted.";
+        error.hidden = false;
+        input.focus();
+      }
+    });
+    for (const sibling of document.body.children) {
+      sibling.inert = true;
+    }
+    document.body.append(overlay);
+    input.focus();
+  });
+}
 function openEditor(item) {
+  const invoker = lastInvoker;
+  editorReturnFocus = invoker?.dataset?.itemId
+    ? { itemId: invoker.dataset.itemId, action: invoker.dataset.action }
+    : {};
   editing = item;
+  editorError("");
   const f = item?.fields || { title: "", priority: 0, alarms: [], repeats: [] };
   for (const name of ["title", "notes", "url", "location"]) {
     el(name).value = f[name] || "";
@@ -253,9 +397,12 @@ async function mutate(action, item, extra, reload) {
   try {
     result = await api("/api/mutate", command);
   } catch (error) {
-    el("editor").hidden = true;
     const refused = error.writeOutcome === "refused";
     const committed = error.writeOutcome === "committed";
+    if (!refused) {
+      el("editor").hidden = true;
+      restoreEditorFocus();
+    }
     if (!refused && !committed) {
       uncertainWrites.push({
         at: new Date().toLocaleTimeString(),
@@ -269,6 +416,12 @@ async function mutate(action, item, extra, reload) {
     }
     if (committed) {
       message = `Change saved, but the result could not be reloaded: ${error.message}`;
+    }
+    if (refused) {
+      editorError(message);
+      if (error.code === "sessionFull") {
+        el("pairing").hidden = false;
+      }
     }
     setStatus(message);
     error.reported = true;
@@ -302,6 +455,7 @@ async function load(cursor = {}, target = listID) {
   previousPage = page.previous;
   el("pages").hidden = false;
   pageControls();
+  const editorWasOpen = !el("editor").hidden;
   el("editor").hidden = true;
   el("list-title").textContent =
     lists.find((l) => l.id === listID)?.title || "Selected list";
@@ -338,19 +492,34 @@ async function load(cursor = {}, target = listID) {
     }
     const actions = document.createElement("div");
     actions.className = "actions";
-    const button = (label, action, danger = false) => {
+    const button = (
+      label,
+      action,
+      danger = false,
+      name = label.toLowerCase(),
+    ) => {
       const b = text("button", label);
       b.type = "button";
       b.disabled = busy;
       b.className = danger ? "danger" : "";
-      b.addEventListener("click", () => run(action));
+      b.setAttribute("aria-label", `${label} ${item.fields.title}`);
+      b.dataset.itemId = item.id;
+      b.dataset.action = name;
+      b.addEventListener("click", () => {
+        lastInvoker = b;
+        run(action);
+      });
       actions.append(b);
     };
     const writable = lists.find((l) => l.id === listID)?.writable;
     if (rights.manage && writable) {
       button("Edit", () => openEditor(item));
-      button(item.fields.completed ? "Reopen" : "Complete", () =>
-        mutate(item.fields.completed ? "reopen" : "complete", item, {}, load),
+      button(
+        item.fields.completed ? "Reopen" : "Complete",
+        () =>
+          mutate(item.fields.completed ? "reopen" : "complete", item, {}, load),
+        false,
+        "complete",
       );
       const dest = document.createElement("select");
       dest.setAttribute("aria-label", `Move ${item.fields.title} to list`);
@@ -372,25 +541,22 @@ async function load(cursor = {}, target = listID) {
       button(
         "Delete",
         async () => {
-          const recurrence = item.fields.repeats.length
-            ? " This reminder repeats. EventKit controls the resulting recurrence behavior; review Reminders afterward."
-            : "";
-          if (!window.confirm(`Delete "${item.fields.title}"?${recurrence}`)) {
-            return;
-          }
-          const confirmation = window.prompt(
-            "Type the exact reminder title to confirm deletion:",
-          );
-          if (confirmation === item.fields.title) {
+          const confirmation = await confirmDelete(item);
+          if (confirmation !== null) {
             await mutate("delete", item, { confirmation }, load);
           }
         },
         true,
+        "delete",
       );
     }
     card.append(actions);
     container.append(card);
   }
+  if (editorWasOpen || focusAfterRerender) {
+    restoreEditorFocus();
+  }
+  focusAfterRerender = false;
 }
 async function refresh() {
   const state = await api("/api/session");
@@ -452,10 +618,14 @@ el("forget").addEventListener("click", () => {
     "Page cleared. Revoke this client in the Mac app to end its session.",
   );
 });
-el("new").addEventListener("click", () => run(() => openEditor(null)));
+el("new").addEventListener("click", () => {
+  lastInvoker = el("new");
+  run(() => openEditor(null));
+});
 el("cancel-edit").addEventListener("click", () => {
   editing = null;
   el("editor").hidden = true;
+  restoreEditorFocus();
 });
 // Validate wire shapes before sending, not native recurrence semantics or ranges.
 // An unidentifiable malformed wire replay must still keep the server's unknown outcome.

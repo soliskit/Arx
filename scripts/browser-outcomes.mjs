@@ -34,6 +34,8 @@ export async function checkBrowserOutcomes({ evaluate, until, screenshot }) {
     evaluate(`window.outcomeFixture.mode=${JSON.stringify(value)}`);
   const status = () =>
     evaluate('document.getElementById("status").textContent');
+  const editorError = () =>
+    evaluate('document.getElementById("editor-error")?.textContent ?? ""');
   const submit = async () => {
     await evaluate('document.getElementById("new").click()');
     await until('!busy && !document.getElementById("editor").hidden');
@@ -90,7 +92,8 @@ export async function checkBrowserOutcomes({ evaluate, until, screenshot }) {
     const unresolved = await evaluate("JSON.stringify(uncertainWrites)");
     await mode("conflict-refused");
     await submit();
-    assert.match(await status(), /Nothing was changed/);
+    // Refused writes keep the editor open and report inside it (#24).
+    assert.match(await editorError(), /Nothing was changed/);
     assert.equal(await evaluate("JSON.stringify(uncertainWrites)"), unresolved);
     await screenshot("06g-conflict-refused");
     await mode("committed-unreadable");
