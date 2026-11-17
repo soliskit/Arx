@@ -187,3 +187,30 @@ struct ArxTests {
     }
   }
 }
+
+@MainActor struct DraftGrantTests {
+  @Test func refreshDropsDeletedDraftIDsWithoutChangingExistingClientGrant() throws {
+    let model = BridgeViewModel(fixture: true)
+    let store = try #require(model.store as? FixtureStore)
+    try model.sharing.start()
+    model.rights.read = true
+    model.rights.lists = ["inbox", "weekend"]
+    let state = try model.sharing.exchange(
+      model.sharing.pairClient(label: "Existing fixture", rights: model.rights).1)
+    store.collections.removeAll { $0.id == "weekend" }
+    // A same-named replacement never inherits selection or a grant.
+    store.collections.append(.init(id: "replacement", title: "Weekend"))
+    model.refresh()
+    #expect(model.rights.lists == ["inbox"])
+    #expect(try model.sharing.sessionState(state.token).rights.lists == ["inbox", "weekend"])
+    model.pair()
+    #expect(!model.pairingSecret.isEmpty)
+    store.collections.removeAll()
+    model.refresh()
+    #expect(model.rights.lists.isEmpty)
+    #expect(model.rights.read)
+    model.pair()
+    #expect(!model.pairingSecret.isEmpty)
+    model.stop()
+  }
+}

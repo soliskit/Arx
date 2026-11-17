@@ -60,6 +60,7 @@ import Observation
   func refresh() {
     do {
       lists = try sharing.inventory()
+      rights.lists.formIntersection(Set(lists.map(\.id)))
       clients = sharing.clientInfo
       if connected {
         message =

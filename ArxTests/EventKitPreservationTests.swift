@@ -140,3 +140,56 @@ import Testing
   }
 
 }
+
+@MainActor struct BasicFieldPreservationTests {
+  @Test func unchangedWireValuesDoNotAssignNativeBasicFields() throws {
+    let adapter = EventKitStore()
+    let reminder = EKReminder(eventStore: EKEventStore())
+    reminder.title = "Native title"
+    reminder.notes = "Native notes"
+    reminder.url = URL(string: "https://native.example.com")
+    reminder.location = "Native location"
+    reminder.priority = 3
+    var fields = ReminderFields(title: "Wire base title")
+    fields.notes = "Wire base notes"
+    fields.url = "https://base.example.com"
+    fields.location = "Wire base location"
+    fields.priority = 5
+    let base = SharedReminder(id: "fixture", listID: "fixture", fields: fields)
+    // Deliberately distinct native sentinels prove setters are skipped. In a real
+    // save, the fresh-snapshot conflict guard runs before this adapter step.
+    fields.completed = true
+    try adapter.apply(fields, to: reminder, preserving: base)
+    #expect(reminder.title == "Native title")
+    #expect(reminder.notes == "Native notes")
+    #expect(reminder.url?.absoluteString == "https://native.example.com")
+    #expect(reminder.location == "Native location")
+    #expect(reminder.priority == 3)
+    #expect(reminder.isCompleted)
+  }
+  @Test func creationAndDeliberateBasicEditsStillAssignAndClear() throws {
+    let adapter = EventKitStore()
+    let reminder = EKReminder(eventStore: EKEventStore())
+    var fields = ReminderFields(title: "Created")
+    fields.notes = "Notes"
+    fields.url = "https://fixture.example.com"
+    fields.location = "Location"
+    fields.priority = 5
+    try adapter.apply(fields, to: reminder, preserving: nil)
+    #expect(reminder.title == fields.title)
+    #expect(reminder.notes == fields.notes)
+    #expect(reminder.url?.absoluteString == fields.url)
+    #expect(reminder.location == fields.location)
+    #expect(reminder.priority == fields.priority)
+    let base = SharedReminder(id: "fixture", listID: "fixture", fields: fields)
+    fields.title = "Edited"
+    fields.notes = nil
+    fields.url = nil
+    fields.location = nil
+    fields.priority = 0
+    try adapter.apply(fields, to: reminder, preserving: base)
+    #expect(reminder.title == "Edited")
+    #expect(reminder.notes == nil && reminder.url == nil && reminder.location == nil)
+    #expect(reminder.priority == 0)
+  }
+}

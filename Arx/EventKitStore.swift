@@ -71,7 +71,7 @@ import Foundation
       }
     }
     do {
-      item.calendar = destination
+      if updated.listID != base.listID { item.calendar = destination }
       try store.save(item, commit: true)
     } catch {
       item.reset()
@@ -237,11 +237,11 @@ import Foundation
           setPositions: value.positions?.map(NSNumber.init(value:)), end: end)
       }
     }
-    r.title = f.title
-    r.notes = f.notes
-    r.url = f.url.flatMap(URL.init(string:))
-    r.location = f.location
-    r.priority = f.priority
+    if base == nil || f.title != base?.fields.title { r.title = f.title }
+    if base == nil || f.notes != base?.fields.notes { r.notes = f.notes }
+    if base == nil || f.url != base?.fields.url { r.url = f.url.flatMap(URL.init(string:)) }
+    if base == nil || f.location != base?.fields.location { r.location = f.location }
+    if base == nil || f.priority != base?.fields.priority { r.priority = f.priority }
     if f.start != base?.fields.start { r.startDateComponents = components(f.start) }
     if f.due != base?.fields.due { r.dueDateComponents = components(f.due) }
     if r.isCompleted != f.completed { r.isCompleted = f.completed }
