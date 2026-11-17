@@ -31,7 +31,7 @@ on run argv
     if item 1 of argv is "field" then
       set matches to (my attr(node, "AXRole") is "AXTextField" and (my attr(node, "AXPlaceholderValue") is item 2 of argv or my attr(node, "AXValue") is item 2 of argv))
     else
-      set matches to (my attr(node, "AXRole") is "AXButton" and (my attr(node, "AXTitle") is item 2 of argv or my attr(node, "AXDescription") is item 2 of argv))
+      set matches to (my attr(node, "AXRole") is "AXButton" and my attr(node, "AXIdentifier") is item 2 of argv)
     end if
     if matches then
       set target to node
@@ -57,7 +57,7 @@ APPLESCRIPT
 }
 control field 'Exact remote HTTPS origin' https://bridge.example.test
 control field 8765 18769
-control press 'Start bridge'
+control press bridge-start
 ready=false
 for _ in $(seq 1 50); do
   if curl --fail --silent --show-error --max-time 1 -H 'Host: bridge.example.test' -H 'X-Forwarded-Proto: https' http://127.0.0.1:18769/ > fixture-lifetime-page.html 2>fixture-lifetime-curl.log; then ready=true; break; fi
@@ -88,8 +88,8 @@ for _ in $(seq 1 50); do
   sleep 0.2
 done
 [[ "${windows}" == 1 ]] || { echo "Fixture did not reopen with one window"; exit 1; }
-control enabled 'Start bridge' true
-control enabled 'Stop all sharing' false
+control enabled bridge-start true
+control enabled bridge-stop false
 status=0
 curl --silent --show-error --max-time 2 http://127.0.0.1:18769/ > fixture-after-reopen.txt 2>fixture-after-reopen.log || status=$?
 [[ "${status}" == 7 ]] || { echo "Reopening unexpectedly restored a listener"; exit 1; }

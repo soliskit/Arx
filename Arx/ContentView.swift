@@ -69,9 +69,11 @@ struct ContentView: View {
                   model.running
                     ? "Listener running" : model.starting ? "Starting listener" : "Start bridge"
                 ) { model.start() }
+                .accessibilityIdentifier("bridge-start")
                 .disabled(!model.connected || model.running || model.starting)
-                Button("Stop all sharing", role: .destructive) { model.stop() }.disabled(
-                  !model.running)
+                Button("Stop all sharing", role: .destructive) { model.stop() }
+                  .accessibilityIdentifier("bridge-stop")
+                  .disabled(!model.running)
               }
             }.padding(6)
           }
