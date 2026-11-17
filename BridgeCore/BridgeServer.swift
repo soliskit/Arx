@@ -29,6 +29,14 @@ public struct BridgeConfiguration: Sendable {
 }
 
 public struct BridgeServer: Sendable {
+  private static let webContentTypes: [String: String] = [
+    "/": "text/html; charset=utf-8",
+    "/app.js": "text/javascript; charset=utf-8",
+    "/apple-touch-icon.png": "image/png",
+    "/favicon-32.png": "image/png",
+    "/favicon.svg": "image/svg+xml",
+    "/style.css": "text/css; charset=utf-8",
+  ]
   let sharing: SharingController
   public let configuration: BridgeConfiguration
   public init(sharing: SharingController, configuration: BridgeConfiguration) {
@@ -40,7 +48,7 @@ public struct BridgeServer: Sendable {
   {
     let router = Router()
     router.add(middleware: EnvelopeMiddleware(server: self))
-    for path in ["/", "/app.js", "/style.css", "/api/session", "/api/lists"] {
+    for path in Self.webContentTypes.keys.sorted() + ["/api/session", "/api/lists"] {
       router.get(RouterPath(path)) { request, _ in await handle(request) }
     }
     for path in ["/api/pair", "/api/read", "/api/mutate"] {
@@ -80,17 +88,13 @@ public struct BridgeServer: Sendable {
   private func handle(_ request: Request) async -> Response {
     do {
       let path = request.uri.path
-      if request.method == .get, ["/", "/app.js", "/style.css"].contains(path) {
+      if request.method == .get, let contentType = Self.webContentTypes[path] {
         let name = path == "/" ? "index.html" : String(path.dropFirst())
         guard
           let url = Bundle.module.url(forResource: name, withExtension: nil, subdirectory: "Web"),
           let data = try? Data(contentsOf: url)
         else { throw BridgeFailure.unavailable }
-        return response(
-          .ok, data: data,
-          contentType: path == "/"
-            ? "text/html; charset=utf-8"
-            : path == "/app.js" ? "text/javascript; charset=utf-8" : "text/css; charset=utf-8")
+        return response(.ok, data: data, contentType: contentType)
       }
       if path == "/api/pair" {
         let pair: PairRequest = try await decode(request)
@@ -249,7 +253,7 @@ public struct BridgeServer: Sendable {
       ("X-Content-Type-Options", "nosniff"),
       (
         "Content-Security-Policy",
-        "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+        "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
       ),
       ("Referrer-Policy", "no-referrer"), ("X-Frame-Options", "DENY"),
     ] { fields[HTTPField.Name(name)!] = value }
