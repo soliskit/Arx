@@ -59,18 +59,22 @@ struct ContentView: View {
           GroupBox("Connection") {
             VStack(alignment: .leading, spacing: 10) {
               TextField("Exact remote HTTPS origin", text: $model.origin).textContentType(.URL)
-                .disabled(model.running || model.starting)
-              TextField("Local port", text: $model.port).disabled(model.running || model.starting)
+                .disabled(model.running || model.starting || model.stopping)
+              TextField("Local port", text: $model.port).disabled(
+                model.running || model.starting || model.stopping)
               Text(
                 "Keep the Mac, Arx and your connector running."
               ).font(.caption).foregroundStyle(.secondary)
               HStack {
                 Button(
                   model.running
-                    ? "Listener running" : model.starting ? "Starting listener" : "Start bridge"
+                    ? "Listener running"
+                    : model.starting
+                      ? "Starting listener"
+                      : model.stopping ? "Stopping listener" : "Start bridge"
                 ) { model.start() }
                 .accessibilityIdentifier("bridge-start")
-                .disabled(!model.connected || model.running || model.starting)
+                .disabled(!model.connected || model.running || model.starting || model.stopping)
                 Button("Stop all sharing", role: .destructive) { model.stop() }
                   .accessibilityIdentifier("bridge-stop")
                   .disabled(!model.running)

@@ -50,7 +50,7 @@ public struct BridgeServer: Sendable {
     return Application(
       router: router,
       configuration: .init(
-        address: .hostname("127.0.0.1", port: configuration.port), backlog: 32, reuseAddress: false),
+        address: .hostname("127.0.0.1", port: configuration.port), backlog: 32, reuseAddress: true),
       onServerRunning: { _ in await onRunning() }, logger: logger)
   }
   public func run(onRunning: @escaping @Sendable () async -> Void = {}) async throws {

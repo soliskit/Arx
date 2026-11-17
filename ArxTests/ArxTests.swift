@@ -5,7 +5,10 @@
 //  Created by David Solis on 11/15/26.
 //
 
+import AppKit
 import BridgeCore
+import Foundation
+import SwiftUI
 import Testing
 
 @testable import Arx
@@ -112,5 +115,90 @@ struct ArxTests {
     #expect(model.pairingSecret.isEmpty)
     #expect(model.clients.isEmpty)
     #expect(!model.sharing.running)
+  }
+}
+
+@MainActor struct BridgeRestartTests {
+  private func waitUntil(_ condition: () -> Bool) async throws {
+    for _ in 0..<100 {
+      if condition() { return }
+      try await Task.sleep(for: .milliseconds(50))
+    }
+    try #require(condition(), "Fixture listener did not settle")
+  }
+  @Test func stopWhileStartingBlocksReplacementUntilTaskFinishes() async throws {
+    let model = BridgeViewModel(fixture: true)
+    model.origin = "https://bridge.example.com"
+    model.port = String(Int.random(in: 20000...60000))
+    model.start()
+    #expect(model.starting)
+    model.stop()
+    #expect(model.stopping)
+    #expect(!model.running && !model.starting && !model.sharing.running)
+    model.start()
+    #expect(model.stopping && !model.starting && !model.sharing.running)
+    // No actor suspension happened between Start/Stop/Start above.
+    try await waitUntil { !model.stopping }
+    #expect(!model.running && !model.starting)
+    model.start()
+    do {
+      try await waitUntil { model.running || !model.starting }
+      try #require(model.running)
+    } catch {
+      model.stop()
+      try? await waitUntil { !model.stopping }
+      throw error
+    }
+    model.stop()
+    try await waitUntil { !model.stopping }
+  }
+  @Test func repeatedRestartRevokesOldCredentialsAndClearsStopping() async throws {
+    let model = BridgeViewModel(fixture: true)
+    model.origin = "https://bridge.example.com"
+    model.port = String(Int.random(in: 20000...60000))
+    for _ in 0..<2 {
+      model.start()
+      do {
+        try await waitUntil { model.running || !model.starting }
+        try #require(model.running)
+        let (_, secret) = try model.sharing.pairClient(label: "Fixture", rights: ClientRights())
+        let session = try model.sharing.exchange(secret)
+        let (_, unused) = try model.sharing.pairClient(
+          label: "Pending fixture", rights: ClientRights())
+        model.stop()
+        model.stop()
+        #expect(model.stopping)
+        #expect(!model.sharing.running)
+        #expect(model.clients.isEmpty && model.pairingSecret.isEmpty)
+        #expect(throws: BridgeFailure.denied) { try model.sharing.sessionState(session.token) }
+        model.start()
+        #expect(!model.starting && !model.running && model.stopping)
+        try await waitUntil { !model.stopping }
+        model.start()
+        try await waitUntil { model.running || !model.starting }
+        try #require(model.running)
+        #expect(throws: BridgeFailure.denied) { try model.sharing.sessionState(session.token) }
+        #expect(throws: BridgeFailure.denied) { try model.sharing.exchange(unused) }
+      } catch {
+        model.stop()
+        try? await waitUntil { !model.stopping }
+        throw error
+      }
+      model.stop()
+      try await waitUntil { !model.stopping }
+    }
+  }
+  @Test func stoppingPanelSnapshot() throws {
+    // A frozen fixture state renders the actual view without delaying a live listener.
+    let model = BridgeViewModel(fixture: true)
+    model.stopping = true
+    model.message = "Access revoked. Waiting for the local listener to stop."
+    let view = NSHostingView(rootView: ContentView(model: model))
+    view.frame = NSRect(x: 0, y: 0, width: 1200, height: 650)
+    view.layoutSubtreeIfNeeded()
+    let image = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+    view.cacheDisplay(in: view.bounds, to: image)
+    let png = try #require(image.representation(using: .png, properties: [:]))
+    try png.write(to: URL(fileURLWithPath: "/tmp/arx-restart-stopping.png"))
   }
 }

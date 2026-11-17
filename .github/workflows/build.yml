@@ -66,7 +66,9 @@ jobs:
       - name: Lint the Swift sources
         run: swift format lint --strict --recursive BridgeCore BridgeCoreTests BridgeFixtureServer Arx ArxTests ArxUITests Package.swift scripts/fixture-display.swift
       - name: Run bridge package tests
-        run: swift test --parallel
+        run: |
+          swift test --parallel
+          bash scripts/check-listener-exclusivity.sh .build/debug/BridgeFixtureServer
       - name: Verify browser script syntax
         run: |
           node --check BridgeCore/Web/app.js
@@ -97,7 +99,9 @@ jobs:
         if: always()
         with:
           name: arx-mac-only-settings
-          path: settings-*.json
+          path: |
+            settings-*.json
+            /tmp/arx-restart-stopping.png
 
   mac-screenshot:
     runs-on: xcode-27
@@ -154,6 +158,7 @@ jobs:
           CHROME_PATH="$(command -v google-chrome || command -v chromium)"
           export CHROME_PATH
           test -n "$CHROME_PATH"
+          bash scripts/check-listener-exclusivity.sh .build/debug/BridgeFixtureServer
           node --test scripts/browser-startup.test.mjs
           node scripts/browser-proof.mjs .build/debug/BridgeFixtureServer browser-evidence
       - uses: actions/upload-artifact@v4
