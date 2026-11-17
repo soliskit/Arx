@@ -39,6 +39,20 @@ export async function checkBrowserOutcomes({ evaluate, until, screenshot }) {
     await until("!busy");
   };
   try {
+    // Call the actual API helper with oversized UTF-8 JSON and prove fetch was never reached.
+    const sizeResult = await evaluate(`(async () => {
+      const before = window.outcomeFixture.commands.length;
+      const sessionBefore = { csrf, rights: JSON.stringify(rights) };
+      let error;
+      try { await api("/api/mutate", { operationID: crypto.randomUUID(), notes: "界".repeat(349526) }); }
+      catch (failure) { error = { message: failure.message, outcome: failure.writeOutcome }; }
+      return { before, after: window.outcomeFixture.commands.length, error,
+        sameSession: csrf === sessionBefore.csrf && JSON.stringify(rights) === sessionBefore.rights };
+    })()`);
+    assert.equal(sizeResult.after, sizeResult.before);
+    assert.equal(sizeResult.sameSession, true);
+    assert.equal(sizeResult.error.outcome, "refused");
+    assert.match(sizeResult.error.message, /1 MiB/);
     const initial = await evaluate(
       '({id:listID, heading:document.getElementById("list-title").textContent})',
     );

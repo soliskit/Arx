@@ -8,7 +8,7 @@
 import Foundation
 
 public enum BridgeFailure: Error, Equatable, Sendable {
-  case denied, invalid, conflict, unavailable, ambiguous, rateLimited
+  case denied, invalid, conflict, unavailable, ambiguous, rateLimited, tooLarge
 }
 
 public struct ReminderList: Codable, Identifiable, Equatable, Sendable {

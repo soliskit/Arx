@@ -132,7 +132,10 @@ public struct BridgeServer: Sendable {
             token, list: input.listID, after: input.after, before: input.before))
       }
       if path == "/api/mutate" {
-        let command: Mutation = try await decode(request)
+        guard header("X-CSRF-Token", request) == (try await sharing.sessionState(token)).csrf else {
+          throw BridgeFailure.denied
+        }
+        let command: Mutation = try await decode(request, limit: 1_048_576)
         return try json(
           WriteResponse(
             reminder: try await sharing.mutate(
@@ -153,6 +156,10 @@ public struct BridgeServer: Sendable {
         status = .conflict
         message =
           "Result uncertain. Refresh and check Reminders. Do not repeat this operation blindly."
+      case BridgeFailure.tooLarge:
+        status = .contentTooLarge
+        message =
+          "This reminder request exceeds 1 MiB, including its original copy. Shorten the notes."
       case BridgeFailure.rateLimited:
         status = .tooManyRequests
         message = "Requests temporarily limited. Try later."
@@ -167,8 +174,18 @@ public struct BridgeServer: Sendable {
         ?? response(.internalServerError, data: Data())
     }
   }
-  private func decode<T: Decodable>(_ request: Request) async throws -> T {
-    let body = try await request.body.collect(upTo: 65_536)
+  private func decode<T: Decodable>(_ request: Request, limit: Int = 65_536) async throws -> T {
+    let body: ByteBuffer
+    do {
+      body = try await request.body.collect(upTo: limit)
+    } catch {
+      if limit == 1_048_576,
+        let error = error as? any HTTPResponseError, error.status == .contentTooLarge
+      {
+        throw BridgeFailure.tooLarge
+      }
+      throw error
+    }
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
     // A body that does not parse is a bad request, not a lost session.
