@@ -37,6 +37,10 @@ import Observation
     if fixture {
       connected = true
       refresh()
+      if ProcessInfo.processInfo.arguments.contains("--fixture-stopping") {
+        stopping = true
+        message = "Access revoked. Waiting for the local listener to stop."
+      }
     }
     observer = NotificationCenter.default.addObserver(
       forName: .EKEventStoreChanged, object: nil, queue: .main

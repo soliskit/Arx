@@ -99,9 +99,7 @@ jobs:
         if: always()
         with:
           name: arx-mac-only-settings
-          path: |
-            settings-*.json
-            /tmp/arx-restart-stopping.png
+          path: settings-*.json
 
   mac-screenshot:
     runs-on: xcode-27

@@ -5,10 +5,8 @@
 //  Created by David Solis on 11/15/26.
 //
 
-import AppKit
 import BridgeCore
 import Foundation
-import SwiftUI
 import Testing
 
 @testable import Arx
@@ -187,33 +185,5 @@ struct ArxTests {
       model.stop()
       try await waitUntil { !model.stopping }
     }
-  }
-  @Test func stoppingPanelSnapshot() throws {
-    // A frozen fixture state renders the actual view without delaying a live listener.
-    let model = BridgeViewModel(fixture: true)
-    model.stopping = true
-    model.message = "Access revoked. Waiting for the local listener to stop."
-    let view = NSHostingView(rootView: ContentView(model: model))
-    let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 1200, height: 650),
-      styleMask: [.titled, .closable], backing: .buffered, defer: false)
-    window.contentView = view
-    window.title = "Arx stopping fixture"
-    window.setFrameOrigin(NSPoint(x: 0, y: 40))
-    window.makeKeyAndOrderFront(nil)
-    window.orderFrontRegardless()
-    defer { window.orderOut(nil) }
-    view.layoutSubtreeIfNeeded()
-    window.displayIfNeeded()
-    RunLoop.current.run(until: Date().addingTimeInterval(0.5))
-    // SwiftUI's layer-backed labels are absent from bitmapImageRep snapshots.
-    // Capture the real fixture window instead of accepting a blank image.
-    let capture = Process()
-    capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-    capture.arguments = ["-x", "-l", String(window.windowNumber), "/tmp/arx-restart-stopping.png"]
-    try capture.run()
-    capture.waitUntilExit()
-    #expect(capture.terminationStatus == 0)
-
   }
 }
