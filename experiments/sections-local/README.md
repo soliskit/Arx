@@ -54,8 +54,8 @@ The owner prepares only disposable objects in Apple Reminders:
 5. Enter the expected unique section name from Apple Reminders. Run ONE section
    read. The Run button is permanently disabled before launch. Do not relaunch
    the mode to retry a real read without a separate decision.
-6. Return only the copyable sanitized report: OS/build, status and whether the
-   expected section matched. No IDs, titles, account labels, raw worker output,
+6. Return only the copyable sanitized report: OS/build, status, requested step, fixed reason and whether
+   the expected section matched. No IDs, titles, account labels, raw worker output,
    private logs or unrelated screenshots. A match is candidate positive evidence
    on this machine/build, not proof of transaction isolation or shipping quality.
 7. Delete only the owner-created reminder and temporary section in Apple
@@ -79,7 +79,22 @@ The private membership selector is guarded by argument/return ABI metadata.
 After the read, provenance and parent/account identity are checked again. The
 returned section must have a valid section ID and the exact bound parent/account.
 Only then is its display name compared locally with the expected unique name.
-The returned report contains only a match boolean, never the section ID/name.
+The returned report contains only sanitized status fields and a match boolean,
+never the section ID/name. The requested step is labels, selection or read. It
+identifies the operation requested by the UI, NOT proof a membership call began.
+The copyable report and status line use a closed reason vocabulary. Unknown
+worker reasons are never displayed. The worker preserves only allowlisted native
+refusals and distinguishes a validated section-name mismatch from unavailable
+membership. A timeout, crash or malformed result means read invocation is unknown;
+there is no checkpoint file, persistent log, extra provider call or retry.
+Object binding refusals can occur before or after membership, and the fixed
+reason does not distinguish those points. Membership-unverified includes nil,
+provider error and invalid section metadata. API-unavailable includes missing
+exact store or guarded view/selector. These are diagnostics, not new capability
+claims. Synthetic checks cannot establish which failure occurs on an owner's Mac.
+
+This diagnostic revision has no authority to run a second local experiment.
+A separate owner decision is required before any further real step.
 Nil is unknown, never unsectioned. There is no native `none` result and no write
 or assignment path. Re-reading properties does not establish atomic freshness.
 

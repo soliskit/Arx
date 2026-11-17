@@ -1,3 +1,4 @@
+#import "Diagnostic.h"
 #import "ExactReader.h"
 #include <stdio.h>
 
@@ -133,6 +134,19 @@ int main(void) {
         expect([failure[@"reason"] isEqual:@"private_api_exception"] && failure.count == 2, "exception sanitized");
         expect(![[failure description] containsString:@"PRIVATE-SENSITIVE"], "no exception disclosure"); view.throws = NO;
         expect([READ()[@"state"] isEqual:@"section"], "fresh read recovers after exception");
+        for (NSString *reason in @[@"denied", @"identity_unverified", @"membership_unverified", @"private_api_exception"]) {
+            NSDictionary *r = ARXSectionDiagnostic(@{@"state": @"unknown", @"reason": reason, @"private": @"PRIVATE-SENSITIVE"});
+            expect([r[@"reason"] isEqual:reason] && r.count == 3, "fixed refusal preserved");
+            expect(![[r description] containsString:@"PRIVATE-SENSITIVE"], "diagnostic excludes private fields");
+        }
+        expect([ARXSectionDiagnostic(@{@"state": @"unknown", @"reason": @"unavailable"})[@"reason"] isEqual:@"membership_api_unavailable"], "API absence distinct");
+        expect([ARXSectionDiagnostic(@{@"state": @"section", @"sectionMatched": @NO})[@"reason"] isEqual:@"section_name_mismatch"], "mismatch distinct");
+        expect([ARXSectionDiagnostic(positive)[@"sectionMatched"] isEqual:@YES], "positive preserved");
+        for (id bad in @[@{}, @{@"state": @"unknown", @"reason": @"PRIVATE-SENSITIVE"}, @{@"state": @"section", @"sectionMatched": @"PRIVATE-SENSITIVE"}]) {
+            NSDictionary *r = ARXSectionDiagnostic(bad);
+            expect([r[@"reason"] isEqual:@"worker_unavailable"], "malformed diagnostic refused");
+            expect(![[r description] containsString:@"PRIVATE-SENSITIVE"], "untrusted reason not echoed");
+        }
         printf("Exact binding synthetic assertions: %lu PASS\n", (unsigned long)assertions);
     }
 }

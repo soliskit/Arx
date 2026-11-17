@@ -103,4 +103,50 @@ import Testing
     model.locate()
     #expect(model.item == nil)
   }
+  @Test func fixedDiagnosticReasonsAndSteps() {
+    let reasons = [
+      "existing_permission_unavailable", "label_bound_exceeded", "labels_unverified",
+      "selection_unavailable", "selection_timeout", "selection_not_exactly_one",
+      "identity_unverified", "private_framework_unavailable", "membership_api_unavailable",
+      "membership_unverified", "section_name_mismatch", "private_api_exception", "denied",
+      "timeout", "worker_unavailable", "PRIVATE reminder name and ID",
+    ]
+    for action in ["labels", "locate", "read"] {
+      for reason in reasons {
+        let model = SectionsExperimentModel(
+          fixture: true,
+          fixtureReplies: [action: SectionsReply(state: "unknown", reason: reason)])
+        model.selectedList = "fixture-list"
+        model.scratch = true
+        if action == "labels" {
+          model.loadLabels()
+        } else {
+          model.locate()
+          if action == "read" {
+            model.confirmed = true
+            model.expectedSection = "PRIVATE section"
+            model.run()
+          }
+        }
+        #expect(model.finished && !model.canRun && model.item == nil && model.lists.isEmpty)
+        let step = action == "locate" ? "selection" : action
+        #expect(model.report.contains("Step: " + step))
+        #expect(
+          model.report.contains("Reason: " + SectionsExperimentModel.diagnosticReason(reason)))
+        #expect(!model.report.contains("PRIVATE") && !model.message.contains("PRIVATE"))
+        #expect(!model.report.contains("fixture-list") && !model.report.contains("fixture-source"))
+        let stopped = model.report
+        model.loadLabels()
+        model.locate()
+        model.run()
+        #expect(model.report == stopped)
+      }
+    }
+    #expect(SectionsExperimentModel.diagnosticReason("timeout").contains("read unknown"))
+    #expect(SectionsExperimentModel.diagnosticReason("worker_unavailable").contains("read unknown"))
+    #expect(
+      SectionsExperimentModel.diagnosticReason("section_name_mismatch")
+        != SectionsExperimentModel.diagnosticReason("membership_unverified"))
+  }
+
 }

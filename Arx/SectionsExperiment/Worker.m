@@ -1,5 +1,6 @@
 #import "Worker.h"
 #import "ExactReader.h"
+#import "Diagnostic.h"
 #if !defined(ARX_SECTION_READER_FIXTURES)
 #import <EventKit/EventKit.h>
 #endif
@@ -102,9 +103,8 @@ static int refused(NSString *reason) {
             NSDictionary *grant = @{ @"read": @YES, @"sourceID": input[@"sourceID"],
                 @"listID": input[@"listID"], @"reminderID": input[@"reminderID"] };
             NSDictionary *result = [[ARXExactSectionReader new] readRequest:input grant:grant calendar:calendar reminder:item];
-            if ([result[@"state"] isEqual:@"section"] && [result[@"sectionMatched"] isEqual:@YES])
-                return output(@{ @"state": @"section", @"reason": @"exact_object_candidate", @"sectionMatched": @YES }, 0);
-            return output(@{ @"state": @"unknown", @"reason": @"identity_or_membership_unverified", @"sectionMatched": @NO }, 69);
+            NSDictionary *diagnostic = ARXSectionDiagnostic(result);
+            return output(diagnostic, [diagnostic[@"sectionMatched"] isEqual:@YES] ? 0 : 69);
 #endif
         } @catch (NSException *exception) {
             (void)exception;
