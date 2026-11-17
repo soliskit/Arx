@@ -1,0 +1,40 @@
+name: Sections exact binding synthetic proof
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  compile-and-fixtures:
+    runs-on: xcode-27
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and sign native candidate without executing it
+        run: |
+          set -euo pipefail
+          xcrun clang -fobjc-arc -Wall -Wextra -Werror -framework Foundation -framework EventKit experiments/sections-reader/ExactReader.m experiments/sections-reader/BoundedReader.m -o "$RUNNER_TEMP/exact-native-reader"
+          codesign --force --sign - --options runtime --entitlements Arx/Arx.entitlements "$RUNNER_TEMP/exact-native-reader"
+          codesign --verify --strict --verbose=2 "$RUNNER_TEMP/exact-native-reader"
+          codesign -d --entitlements :- "$RUNNER_TEMP/exact-native-reader" > "$RUNNER_TEMP/exact-entitlements.plist"
+          python3 - <<'PYTHON'
+          import os, plistlib
+          from pathlib import Path
+          expected = plistlib.loads(Path('Arx/Arx.entitlements').read_bytes())
+          actual = plistlib.loads((Path(os.environ['RUNNER_TEMP']) / 'exact-entitlements.plist').read_bytes())
+          assert actual == expected and actual['com.apple.security.app-sandbox'] is True
+          print('Native candidate compiled/signed, identical sandbox entitlements; NOT EXECUTED')
+          PYTHON
+      - name: Compile and run synthetic objects and fixture transport only
+        run: |
+          set -euo pipefail
+          cd experiments/sections-reader
+          xcrun clang -std=c11 -Wall -Wextra -Werror gates-test.c -o "$RUNNER_TEMP/exact-section-gates"
+          "$RUNNER_TEMP/exact-section-gates"
+          xcrun clang -fobjc-arc -Wall -Wextra -Werror -DARX_SECTION_READER_FIXTURES=1 -framework Foundation ExactReader.m ExactFixtures.m -o "$RUNNER_TEMP/exact-object-fixtures"
+          "$RUNNER_TEMP/exact-object-fixtures"
+          xcrun clang -fobjc-arc -Wall -Wextra -Werror -DARX_SECTION_READER_FIXTURES=1 -framework Foundation BoundedReader.m -o "$RUNNER_TEMP/exact-runner-fixture"
+          python3 runner-fixtures.py "$RUNNER_TEMP/exact-runner-fixture"
