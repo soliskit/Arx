@@ -214,7 +214,14 @@ import Foundation
     let candidates = sorted.filter { key in
       (afterID == nil || key > afterID!) && (beforeID == nil || key < beforeID!)
     }
-    let page = before == nil ? Array(candidates.prefix(100)) : Array(candidates.suffix(100))
+    // A concurrent deletion may remove everything beyond a valid boundary.
+    // Recover the nearest remaining page rather than claiming the whole list is empty.
+    let page: [String]
+    if candidates.isEmpty, afterID != nil || beforeID != nil {
+      page = before == nil ? Array(sorted.suffix(100)) : Array(sorted.prefix(100))
+    } else {
+      page = before == nil ? Array(candidates.prefix(100)) : Array(candidates.suffix(100))
+    }
     // Current store membership, not the asynchronous snapshot, is authoritative.
     let items = page.compactMap { key -> SharedReminder? in
       guard let item = try? store.current(key), item.listID == list else { return nil }
@@ -267,9 +274,11 @@ import Foundation
         basic.repeats = []
         try basic.validate()
         if fields.alarms != command.base?.fields.alarms {
+          guard fields.alarms.count <= 10 else { throw BridgeFailure.invalid }
           for alarm in fields.alarms { try alarm.validate() }
         }
         if fields.repeats != command.base?.fields.repeats {
+          guard fields.repeats.count <= 10 else { throw BridgeFailure.invalid }
           for rule in fields.repeats { try rule.validate() }
         }
       }

@@ -14,6 +14,7 @@ import https from "node:https";
 import http from "node:http";
 import assert from "node:assert/strict";
 import { checkBrowserOutcomes } from "./browser-outcomes.mjs";
+import { checkBrowserEdits } from "./browser-edits.mjs";
 import { checkBrowserInput } from "./browser-input.mjs";
 import { startupDiagnostics } from "./browser-startup.mjs";
 const temporary = mkdtempSync(join(tmpdir(), "arx-fixture-"));
@@ -415,6 +416,7 @@ try {
   );
   assert.deepEqual(dialogs, ["confirm", "prompt"]);
   await checkBrowserInput({ evaluate, until, send, screenshot });
+  await checkBrowserEdits({ evaluate, until, screenshot });
   await checkBrowserOutcomes({ evaluate, until, screenshot });
   const csrfDenied = await evaluate(
     'fetch("/api/read",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({listID})}).then(r=>r.status)',
@@ -444,6 +446,32 @@ try {
     },
   );
   await screenshot("06-denied-cleared");
+  const noneSecret = readFileSync(join(temporary, "pairing-none"), "utf8");
+  await evaluate(
+    `el("secret").value=${JSON.stringify(noneSecret)};el("pair-form").requestSubmit()`,
+  );
+  await until('!busy && !el("workspace").hidden');
+  assert.equal(await evaluate('el("pairing").hidden'), true);
+  assert.equal(
+    await evaluate('el("list-title").textContent'),
+    "No lists shared",
+  );
+  assert.match(
+    await evaluate('el("status").textContent'),
+    /No lists or actions/,
+  );
+  await send("Page.reload");
+  await until('document.getElementById("workspace")?.hidden===false');
+  assert.equal(await evaluate('el("pairing").hidden'), true);
+  assert.match(
+    await evaluate('el("status").textContent'),
+    /No lists or actions/,
+  );
+  assert.equal(await evaluate("lists.length"), 0);
+  await screenshot("07-paired-no-access");
+  await send("Network.clearBrowserCookies");
+  await evaluate('api("/api/session").catch(()=>{})');
+  await until('el("pairing").hidden===false');
   writeFileSync(
     join(evidence, "results.json"),
     JSON.stringify(
