@@ -151,8 +151,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: package.json
-      - name: Build fixture server
-        run: swift build --product BridgeFixtureServer --jobs 2
+      - name: Build fixture server and run Linux package tests
+        run: |
+          swift build --product BridgeFixtureServer --jobs 2
+          swift test --jobs 2 --parallel
       - name: Locate browser and run HTTPS fixture proof
         run: |
           CHROME_PATH="$(command -v google-chrome || command -v chromium)"

@@ -194,11 +194,26 @@ struct ArxTests {
     model.stopping = true
     model.message = "Access revoked. Waiting for the local listener to stop."
     let view = NSHostingView(rootView: ContentView(model: model))
-    view.frame = NSRect(x: 0, y: 0, width: 1200, height: 650)
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 1200, height: 650),
+      styleMask: [.titled, .closable], backing: .buffered, defer: false)
+    window.contentView = view
+    window.title = "Arx stopping fixture"
+    window.setFrameOrigin(NSPoint(x: 0, y: 40))
+    window.makeKeyAndOrderFront(nil)
+    window.orderFrontRegardless()
+    defer { window.orderOut(nil) }
     view.layoutSubtreeIfNeeded()
-    let image = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
-    view.cacheDisplay(in: view.bounds, to: image)
-    let png = try #require(image.representation(using: .png, properties: [:]))
-    try png.write(to: URL(fileURLWithPath: "/tmp/arx-restart-stopping.png"))
+    window.displayIfNeeded()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+    // SwiftUI's layer-backed labels are absent from bitmapImageRep snapshots.
+    // Capture the real fixture window instead of accepting a blank image.
+    let capture = Process()
+    capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+    capture.arguments = ["-x", "-l", String(window.windowNumber), "/tmp/arx-restart-stopping.png"]
+    try capture.run()
+    capture.waitUntilExit()
+    #expect(capture.terminationStatus == 0)
+
   }
 }
