@@ -46,7 +46,7 @@ import Testing
       sharing: sharing, configuration: try .init(origin: "https://bridge.example.com", port: 18772))
     try await server.application().test(.live) { live in
       let port = try #require(live.port)
-      try await TestClient.withClient(host: "127.0.0.1", port: port) { client in
+      try await TestClient.withClient(host: "localhost", port: port) { client in
         var headers = HTTPFields()
         headers[HTTPField.Name("X-Forwarded-Proto")!] = "https"
         headers[.origin] = "https://bridge.example.com"
