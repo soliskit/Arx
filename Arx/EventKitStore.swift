@@ -190,10 +190,12 @@ import Foundation
     try basic.validate()
     // Validate every changed advanced field before touching the EventKit object.
     if f.alarms != base?.fields.alarms {
+      guard f.alarms.count <= 10 else { throw BridgeFailure.invalid }
       guard base?.unsupportedAlarms != true else { throw BridgeFailure.invalid }
       for value in f.alarms { try value.validate() }
     }
     if f.repeats != base?.fields.repeats {
+      guard f.repeats.count <= 10 else { throw BridgeFailure.invalid }
       for value in f.repeats { try value.validate() }
     }
     if f.alarms != base?.fields.alarms {

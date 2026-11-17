@@ -110,4 +110,33 @@ import Testing
     #expect(reminder.url?.absoluteString == "mailto:fixture@example.com")
   }
 
+  @Test func advancedCountRefusalDoesNotDirtyDetachedReminder() throws {
+    let adapter = EventKitStore()
+    for alarms in [true, false] {
+      let reminder = EKReminder(eventStore: EKEventStore())
+      reminder.title = "Count fixture"
+      reminder.alarms = [EKAlarm(relativeOffset: -900)]
+      var fields = ReminderFields(title: "Count fixture")
+      fields.alarms = [.init(relativeOffset: -900)]
+      let base = SharedReminder(id: "fixture", listID: "fixture", fields: fields)
+      fields.notes = "Must not be assigned"
+      if alarms {
+        fields.alarms = Array(repeating: .init(relativeOffset: -60), count: 11)
+      } else {
+        fields.alarms = [.init(relativeOffset: -120)]
+        fields.repeats = Array(repeating: .init(frequency: "daily", interval: 1), count: 11)
+      }
+      // New-object and edit paths both reject before assigning any fields.
+      for prior in [nil, Optional(base)] {
+        #expect(throws: BridgeFailure.invalid) {
+          try adapter.apply(fields, to: reminder, preserving: prior)
+        }
+        #expect(reminder.title == "Count fixture")
+        #expect(reminder.notes == nil)
+        #expect(reminder.alarms?.count == 1)
+        #expect(reminder.alarms?.first?.relativeOffset == -900)
+      }
+    }
+  }
+
 }

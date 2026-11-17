@@ -20,7 +20,8 @@ public struct BridgeConfiguration: Sendable {
       url.path.isEmpty || url.path == "/", (1024...65535).contains(port),
       !host.contains(":"), !host.contains("localhost"), host != "127.0.0.1"
     else { throw BridgeFailure.invalid }
-    let authority = host.lowercased() + (url.port.map { ":\($0)" } ?? "")
+    let portSuffix = url.port.flatMap { $0 == 443 ? nil : ":\($0)" } ?? ""
+    let authority = host.lowercased() + portSuffix
     self.origin = "https://" + authority
     self.host = authority
     self.port = port

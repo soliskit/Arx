@@ -9,6 +9,7 @@ let csrf = "",
   nextPage = null,
   previousPage = null;
 const uncertainWrites = [];
+let editorText = {};
 const el = (id) => document.getElementById(id);
 const text = (tag, value) => {
   const node = document.createElement(tag);
@@ -48,6 +49,7 @@ function clear() {
   rows = [];
   listID = "";
   editing = null;
+  editorText = {};
   el("workspace").hidden = true;
   el("editor").hidden = true;
   el("edit-form").reset();
@@ -217,6 +219,7 @@ function openEditor(item) {
   const f = item?.fields || { title: "", priority: 0, alarms: [], repeats: [] };
   for (const name of ["title", "notes", "url", "location"]) {
     el(name).value = f[name] || "";
+    editorText[name] = el(name).value;
   }
   el("priority").value = String(f.priority);
   el("timezone").value =
@@ -393,7 +396,7 @@ async function refresh() {
   const state = await api("/api/session");
   csrf = state.csrf;
   rights = state.rights;
-  lists = await api("/api/lists");
+  lists = rights.read ? await api("/api/lists") : [];
   el("workspace").hidden = false;
   el("pairing").hidden = true;
   el("editor").hidden = true;
@@ -421,7 +424,11 @@ async function refresh() {
   } else {
     await load();
   }
-  setStatus("Connected. Only your granted lists and actions are shown.");
+  setStatus(
+    rights.read
+      ? "Connected. Only your granted lists and actions are shown."
+      : "Connected. No lists or actions have been shared with this browser.",
+  );
 }
 el("next").addEventListener("click", () =>
   run(() => load({ after: nextPage })),
@@ -450,21 +457,88 @@ el("cancel-edit").addEventListener("click", () => {
   editing = null;
   el("editor").hidden = true;
 });
+// Validate wire shapes before sending, not native recurrence semantics or ranges.
+// An unidentifiable malformed wire replay must still keep the server's unknown outcome.
+function validateAdvancedJSON(alarms, repeats) {
+  const object = (v) =>
+    v !== null && typeof v === "object" && !Array.isArray(v);
+  const number = (v) => typeof v === "number" && Number.isFinite(v);
+  const integer = (v) => Number.isSafeInteger(v);
+  const string = (v) => typeof v === "string";
+  const date = (v) => {
+    if (!string(v)) {
+      return false;
+    }
+    const parts =
+      /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(Z|[+-](\d{2}):(\d{2}))$/.exec(
+        v,
+      );
+    return (
+      parts !== null &&
+      Number.isFinite(Date.parse(v)) &&
+      Number(parts[2]) < 24 &&
+      Number(parts[3]) < 60 &&
+      Number(parts[4]) < 60 &&
+      (parts[5] === "Z" || (Number(parts[6]) < 24 && Number(parts[7]) < 60)) &&
+      new Date(parts[1]).toISOString().startsWith(parts[1])
+    );
+  };
+  const optional = (v, check) => v === undefined || v === null || check(v);
+  const validAlarm = (v) =>
+    object(v) &&
+    ["relativeOffset", "latitude", "longitude", "radius"].every((k) =>
+      optional(v[k], number),
+    ) &&
+    ["proximity", "label"].every((k) => optional(v[k], string)) &&
+    optional(v.absoluteDate, date);
+  const validRepeat = (v) =>
+    object(v) &&
+    string(v.frequency) &&
+    integer(v.interval) &&
+    ["count", "firstDayOfWeek"].every((k) => optional(v[k], integer)) &&
+    optional(v.calendarIdentifier, string) &&
+    optional(v.endDate, date) &&
+    [
+      "daysOfMonth",
+      "monthsOfYear",
+      "weeksOfYear",
+      "daysOfYear",
+      "positions",
+    ].every((k) =>
+      optional(v[k], (a) => Array.isArray(a) && a.every(integer)),
+    ) &&
+    optional(
+      v.daysOfWeek,
+      (a) =>
+        Array.isArray(a) &&
+        a.every((d) => object(d) && integer(d.day) && integer(d.week)),
+    );
+  if (
+    !Array.isArray(alarms) ||
+    !Array.isArray(repeats) ||
+    !alarms.every(validAlarm) ||
+    !repeats.every(validRepeat)
+  ) {
+    throw Error(
+      "Check the alarm and repeat JSON field types and required keys. Nothing was sent or changed.",
+    );
+  }
+}
 el("edit-form").addEventListener("submit", (event) => {
   event.preventDefault();
   run(async () => {
     const f = structuredClone(editing?.fields || { completed: false });
     for (const name of ["title", "notes", "url", "location"]) {
-      f[name] = el(name).value || undefined;
+      if (!editing || el(name).value !== editorText[name]) {
+        f[name] = el(name).value || undefined;
+      }
     }
     f.priority = Number(el("priority").value);
     f.start = dateValue("start", editing?.fields.start);
     f.due = dateValue("due", editing?.fields.due);
     f.alarms = JSON.parse(el("alarms").value);
     f.repeats = JSON.parse(el("repeats").value);
-    if (!Array.isArray(f.alarms) || !Array.isArray(f.repeats)) {
-      throw Error("Alarms and repeats must be JSON arrays.");
-    }
+    validateAdvancedJSON(f.alarms, f.repeats);
     await mutate(editing ? "edit" : "create", editing, { fields: f }, load);
   });
 });
