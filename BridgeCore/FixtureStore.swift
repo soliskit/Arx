@@ -35,23 +35,29 @@ import Foundation
     return item
   }
   public func create(in list: String, fields: ReminderFields) throws -> SharedReminder {
-    try writable(list)
-    try fields.validate()
+    do {
+      try writable(list)
+      try fields.validate()
+    } catch { throw PrecommitRefusal(error as? BridgeFailure ?? .unavailable) }
     let item = SharedReminder(id: UUID().uuidString, listID: list, fields: fields)
     rows[item.id] = item
     return item
   }
   public func save(_ item: SharedReminder, replacing base: SharedReminder) throws -> SharedReminder
   {
-    guard try current(base.id) == base else { throw BridgeFailure.conflict }
-    try writable(base.listID)
-    try writable(item.listID)
+    do {
+      guard try current(base.id) == base else { throw BridgeFailure.conflict }
+      try writable(base.listID)
+      try writable(item.listID)
+    } catch { throw PrecommitRefusal(error as? BridgeFailure ?? .unavailable) }
     rows[item.id] = item
     return item
   }
   public func remove(_ item: SharedReminder) throws {
-    guard try current(item.id) == item else { throw BridgeFailure.conflict }
-    try writable(item.listID)
+    do {
+      guard try current(item.id) == item else { throw BridgeFailure.conflict }
+      try writable(item.listID)
+    } catch { throw PrecommitRefusal(error as? BridgeFailure ?? .unavailable) }
     rows.removeValue(forKey: item.id)
   }
   private func writable(_ id: String) throws {

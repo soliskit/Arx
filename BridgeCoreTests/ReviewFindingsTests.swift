@@ -79,6 +79,7 @@ import Testing
     var rights = ClientRights()
     rights.lists = ["inbox"]
     rights.read = true
+    rights.manage = true
     let (_, secret) = try sharing.pairClient(label: "HTTP review", rights: rights)
     let state = try sharing.exchange(secret)
     let server = BridgeServer(
@@ -95,6 +96,21 @@ import Testing
         #expect(page.status == .ok)
         headers[.cookie] = "__Host-arx=\(state.token)"
         headers[HTTPField.Name("X-CSRF-Token")!] = state.csrf
+        let base = try await MainActor.run { try sharing.store.current("book") }
+        var stale = base
+        stale.fields.title = "Stale fixture snapshot"
+        let conflictCommand = Mutation(
+          action: .edit, listID: "inbox", itemID: base.id,
+          base: stale, fields: base.fields)
+        let conflict = try await connection.execute(
+          .init(
+            "/api/mutate", method: .post, authority: "bridge.example.com", headers: headers,
+            body: .init(bytes: try JSONEncoder().encode(conflictCommand))))
+        #expect(conflict.status == .conflict)
+        let payload = try JSONDecoder().decode(
+          [String: String].self, from: Data(try #require(conflict.body).readableBytesView))
+        #expect(payload["writeOutcome"] == "refused")
+        #expect(payload["code"] == "conflict")
         let bad = try await connection.execute(
           .init(
             "/api/read", method: .post, authority: "bridge.example.com", headers: headers,
@@ -105,6 +121,26 @@ import Testing
             "/api/session", method: .get, authority: "bridge.example.com", headers: headers,
             body: nil))
         #expect(session.status == .ok)
+        let replayCommand = Mutation(
+          action: .create, listID: "inbox", fields: .init(title: "Private replay"))
+        let replayData = try JSONEncoder().encode(replayCommand)
+        let saved = try await connection.execute(
+          .init(
+            "/api/mutate", method: .post, authority: "bridge.example.com", headers: headers,
+            body: .init(bytes: replayData)))
+        #expect(saved.status == .ok)
+        await MainActor.run { (sharing.store as! FixtureStore).authorized = false }
+        let replay = try await connection.execute(
+          .init(
+            "/api/mutate", method: .post, authority: "bridge.example.com", headers: headers,
+            body: .init(bytes: replayData)))
+        #expect(replay.status == .forbidden)
+        let replayPayload = try JSONDecoder().decode(
+          [String: String].self,
+          from: Data(try #require(replay.body).readableBytesView))
+        #expect(replayPayload["writeOutcome"] == "committed")
+        #expect(!replayPayload.values.contains { $0.contains("Private replay") })
+
       }
     }
     sharing.stop()

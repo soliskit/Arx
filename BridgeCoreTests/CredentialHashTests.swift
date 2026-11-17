@@ -71,4 +71,31 @@ import Testing
       #expect(hashes == before)
     }
   }
+  @Test func mutationIdentityAndEnvelopeEachHashOnceWithTwentyClients() throws {
+    var hashes = 0
+    let c = SharingController(store: FixtureStore()) { value in
+      hashes += 1
+      return SharingController.digest(value)
+    }
+    try c.start()
+    var states: [(token: String, csrf: String)] = []
+    var rights = ClientRights()
+    rights.lists = ["inbox"]
+    rights.read = true
+    rights.manage = true
+    for index in 0..<20 {
+      states.append(try c.exchange(c.pairClient(label: "Client \(index)", rights: rights).1))
+    }
+    for state in states {
+      var before = hashes
+      try c.authorizeMutationEnvelope(state.token, csrf: state.csrf)
+      #expect(hashes == before + 1)
+      before = hashes
+      _ = try c.mutate(
+        state.token, csrf: state.csrf,
+        command: .init(action: .create, listID: "inbox", fields: .init(title: "Hash fixture")))
+      #expect(hashes == before + 1)
+    }
+  }
+
 }

@@ -11,6 +11,21 @@ public enum BridgeFailure: Error, Equatable, Sendable {
   case denied, invalid, conflict, unavailable, ambiguous, rateLimited, tooLarge
 }
 
+/// Only a store path proved to run before any persistent write may throw this.
+public struct PrecommitRefusal: Error, Sendable {
+  public let failure: BridgeFailure
+  public init(_ failure: BridgeFailure) { self.failure = failure }
+}
+public enum WriteOutcome: String, Codable, Sendable { case refused, unknown, committed }
+public struct WriteFailure: Error, Equatable, Sendable {
+  public let failure: BridgeFailure
+  public let outcome: WriteOutcome
+  public init(_ failure: BridgeFailure, outcome: WriteOutcome) {
+    self.failure = failure
+    self.outcome = outcome
+  }
+}
+
 public struct ReminderList: Codable, Identifiable, Equatable, Sendable {
   public var id: String
   public var title: String

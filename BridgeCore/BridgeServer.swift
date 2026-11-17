@@ -65,7 +65,11 @@ public struct BridgeServer: Sendable {
     var rights: ClientRights
     var csrf: String
   }
-  private struct ErrorResponse: Encodable { var error: String }
+  private struct ErrorResponse: Encodable {
+    var error: String
+    var code: String
+    var writeOutcome: WriteOutcome
+  }
   private struct WriteResponse: Encodable { var reminder: SharedReminder? }
   private func header(_ name: String, _ request: Request) -> String? {
     guard let field = HTTPField.Name(name) else { return nil }
@@ -132,9 +136,8 @@ public struct BridgeServer: Sendable {
             token, list: input.listID, after: input.after, before: input.before))
       }
       if path == "/api/mutate" {
-        guard header("X-CSRF-Token", request) == (try await sharing.sessionState(token)).csrf else {
-          throw BridgeFailure.denied
-        }
+        try await sharing.authorizeMutationEnvelope(
+          token, csrf: header("X-CSRF-Token", request) ?? "")
         let command: Mutation = try await decode(request, limit: 1_048_576)
         return try json(
           WriteResponse(
@@ -145,7 +148,9 @@ public struct BridgeServer: Sendable {
     } catch {
       let status: HTTPResponse.Status
       let message: String
-      switch error {
+      let writeFailure = error as? WriteFailure
+      let failure = writeFailure?.failure ?? (error as? BridgeFailure)
+      switch failure ?? .denied {
       case BridgeFailure.conflict:
         status = .conflict
         message = "This reminder changed. Refresh and review before trying again."
@@ -170,7 +175,11 @@ public struct BridgeServer: Sendable {
         status = .forbidden
         message = "Access unavailable. Refresh or pair again."
       }
-      return (try? json(ErrorResponse(error: message), status: status))
+      return
+        (try? json(
+          ErrorResponse(
+            error: message, code: failure.map { String(describing: $0) } ?? "unavailable",
+            writeOutcome: writeFailure?.outcome ?? .unknown), status: status))
         ?? response(.internalServerError, data: Data())
     }
   }

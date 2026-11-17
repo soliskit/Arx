@@ -13,6 +13,19 @@ import Testing
 @testable import Arx
 
 @MainActor struct EventKitPreservationTests {
+  @Test func preparationRefusalIsExplicitAndDoesNotRunLaterWriteStep() throws {
+    var commits = 0
+    do {
+      let _: Int = try EventKitStore.precommit { throw BridgeFailure.conflict }
+      commits += 1
+      Issue.record("Preparation unexpectedly succeeded")
+    } catch let refusal as PrecommitRefusal {
+      #expect(refusal.failure == .conflict)
+    }
+    #expect(commits == 0)
+    let prepared = try EventKitStore.precommit { 7 }
+    #expect(prepared == 7)
+  }
   @Test func notesEditPreservesNativeDateComponents() throws {
     let adapter = EventKitStore()
     // Detached, unsaved object only. No request for access or store fetch.

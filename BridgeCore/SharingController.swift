@@ -116,21 +116,29 @@ import Foundation
       return now.timeIntervalSince(issued) < 86_400 && now.timeIntervalSince(seen) < 1800
     }
   }
+  /// Validates client identity without opening or authorizing provider data.
+  /// Mutation envelopes use this before collecting a potentially large body.
+  public func authorizeMutationEnvelope(_ token: String, csrf: String) throws {
+    _ = try identity(token, csrf: csrf)
+  }
+  private func identity(_ token: String, csrf: String? = nil) throws -> UUID {
+    guard running, token.utf8.count <= 128 else { throw BridgeFailure.denied }
+    let presented = credentialDigest(token)
+    let now = clock()
+    guard let id = clients.first(where: { $0.value.sessionHash == presented })?.key,
+      let client = clients[id], let issued = client.issued, let seen = client.lastSeen,
+      now.timeIntervalSince(issued) < 86_400, now.timeIntervalSince(seen) < 1800,
+      csrf == nil || csrf == client.csrf
+    else { throw BridgeFailure.denied }
+    return id
+  }
   private func session(_ token: String, csrf: String? = nil) throws -> UUID {
     guard running, store.authorized else {
       stop()
       throw BridgeFailure.denied
     }
-    let now = clock()
-    guard token.utf8.count <= 128 else { throw BridgeFailure.denied }
-    let presented = credentialDigest(token)
-    guard let id = clients.first(where: { $0.value.sessionHash == presented })?.key,
-      var client = clients[id], let issued = client.issued, let seen = client.lastSeen,
-      now.timeIntervalSince(issued) < 86_400, now.timeIntervalSince(seen) < 1800,
-      csrf == nil || csrf == client.csrf
-    else { throw BridgeFailure.denied }
-    client.lastSeen = now
-    clients[id] = client
+    let id = try identity(token, csrf: csrf)
+    clients[id]!.lastSeen = clock()
     return id
   }
   public func sessionState(_ token: String) throws -> (rights: ClientRights, csrf: String) {
@@ -222,85 +230,109 @@ import Foundation
         client: id, list: list))
   }
   public func mutate(_ token: String, csrf: String, command: Mutation) throws -> SharedReminder? {
-    let id = try session(token, csrf: csrf)
-    _ = try require(id, list: command.listID, action: command.action)
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = .sortedKeys
-    let encoded = try encoder.encode(command)
-    if let previous = clients[id]!.operations[command.operationID] {
-      guard previous.0 == encoded else { throw BridgeFailure.conflict }
-      guard let prior = previous.1 else { return nil }
-      // Cached contents are never authoritative after external moves or edits.
-      let current = try store.current(prior.id)
-      _ = try require(id, list: current.listID)
-      return current
-    }
-    guard !clients[id]!.uncertain.contains(command.operationID),
-      clients[id]!.operations.count + clients[id]!.uncertain.count < 500
-    else { throw BridgeFailure.ambiguous }
-    if let fields = command.fields {
-      var basic = fields
-      basic.alarms = []
-      basic.repeats = []
-      try basic.validate()
-      if fields.alarms != command.base?.fields.alarms {
-        for alarm in fields.alarms { try alarm.validate() }
-      }
-      if fields.repeats != command.base?.fields.repeats {
-        for rule in fields.repeats { try rule.validate() }
-      }
-    }
-    let result: SharedReminder?
-    // Mark before entering store: a throwing save may already have committed.
+    var outcome = WriteOutcome.unknown
     do {
-      if command.action == .create {
-        guard let fields = command.fields, command.itemID == nil, command.base == nil else {
-          throw BridgeFailure.invalid
+      let id = try identity(token, csrf: csrf)
+      // Preserve certainty before provider loss can invalidate all clients.
+      if clients[id]!.operations[command.operationID] != nil { outcome = .committed }
+      guard store.authorized else {
+        stop()
+        throw BridgeFailure.denied
+      }
+      clients[id]!.lastSeen = clock()
+      let encoder = JSONEncoder()
+      encoder.outputFormatting = .sortedKeys
+      let encoded = try encoder.encode(command)
+      if let previous = clients[id]!.operations[command.operationID] {
+        outcome = .committed
+        guard previous.0 == encoded else { throw BridgeFailure.conflict }
+        _ = try require(id, list: command.listID, action: command.action)
+        guard let prior = previous.1 else { return nil }
+        // Certainty survives access changes, but cached contents do not cross them.
+        let current = try store.current(prior.id)
+        _ = try require(id, list: current.listID)
+        return current
+      }
+      guard !clients[id]!.uncertain.contains(command.operationID) else {
+        throw BridgeFailure.ambiguous
+      }
+      outcome = .refused
+      _ = try require(id, list: command.listID, action: command.action)
+      guard clients[id]!.operations.count + clients[id]!.uncertain.count < 500 else {
+        throw BridgeFailure.rateLimited
+      }
+      if let fields = command.fields {
+        var basic = fields
+        basic.alarms = []
+        basic.repeats = []
+        try basic.validate()
+        if fields.alarms != command.base?.fields.alarms {
+          for alarm in fields.alarms { try alarm.validate() }
         }
-        clients[id]!.uncertain.insert(command.operationID)
-        result = try store.create(in: command.listID, fields: fields)
-      } else {
-        guard let itemID = command.itemID, let base = command.base,
-          base.id == itemID, base.listID == command.listID
-        else { throw BridgeFailure.denied }
-        var current: SharedReminder
-        do { current = try store.current(itemID) } catch { throw BridgeFailure.denied }
-        guard current.listID == command.listID else { throw BridgeFailure.denied }
-        guard current == base else { throw BridgeFailure.conflict }
-        switch command.action {
-        case .create: throw BridgeFailure.invalid
-        case .edit:
-          guard let fields = command.fields, fields.completed == current.fields.completed else {
+        if fields.repeats != command.base?.fields.repeats {
+          for rule in fields.repeats { try rule.validate() }
+        }
+      }
+      let result: SharedReminder?
+      // Mark before entering store: a throwing save may already have committed.
+      do {
+        if command.action == .create {
+          guard let fields = command.fields, command.itemID == nil, command.base == nil else {
             throw BridgeFailure.invalid
           }
-          current.fields = fields
+          outcome = .unknown
           clients[id]!.uncertain.insert(command.operationID)
-          result = try store.save(current, replacing: base)
-        case .move:
-          guard let destination = command.destination else { throw BridgeFailure.invalid }
-          _ = try require(id, list: destination, action: .move)
-          current.listID = destination
-          clients[id]!.uncertain.insert(command.operationID)
-          result = try store.save(current, replacing: base)
-        case .complete, .reopen:
-          current.fields.completed = command.action == .complete
-          clients[id]!.uncertain.insert(command.operationID)
-          result = try store.save(current, replacing: base)
-        case .delete:
-          guard command.confirmation == current.fields.title else { throw BridgeFailure.invalid }
-          clients[id]!.uncertain.insert(command.operationID)
-          try store.remove(current)
-          result = nil
+          result = try store.create(in: command.listID, fields: fields)
+        } else {
+          guard let itemID = command.itemID, let base = command.base,
+            base.id == itemID, base.listID == command.listID
+          else { throw BridgeFailure.denied }
+          var current: SharedReminder
+          do { current = try store.current(itemID) } catch { throw BridgeFailure.denied }
+          guard current.listID == command.listID else { throw BridgeFailure.denied }
+          guard current == base else { throw BridgeFailure.conflict }
+          switch command.action {
+          case .create: throw BridgeFailure.invalid
+          case .edit:
+            guard let fields = command.fields, fields.completed == current.fields.completed else {
+              throw BridgeFailure.invalid
+            }
+            current.fields = fields
+            outcome = .unknown
+            clients[id]!.uncertain.insert(command.operationID)
+            result = try store.save(current, replacing: base)
+          case .move:
+            guard let destination = command.destination else { throw BridgeFailure.invalid }
+            _ = try require(id, list: destination, action: .move)
+            current.listID = destination
+            outcome = .unknown
+            clients[id]!.uncertain.insert(command.operationID)
+            result = try store.save(current, replacing: base)
+          case .complete, .reopen:
+            current.fields.completed = command.action == .complete
+            outcome = .unknown
+            clients[id]!.uncertain.insert(command.operationID)
+            result = try store.save(current, replacing: base)
+          case .delete:
+            guard command.confirmation == current.fields.title else { throw BridgeFailure.invalid }
+            outcome = .unknown
+            clients[id]!.uncertain.insert(command.operationID)
+            try store.remove(current)
+            result = nil
+          }
         }
+      } catch let refusal as PrecommitRefusal {
+        clients[id]!.uncertain.remove(command.operationID)
+        throw WriteFailure(refusal.failure, outcome: .refused)
       }
+      clients[id]!.operations[command.operationID] = (encoded, result)
+      clients[id]!.uncertain.remove(command.operationID)
+      return result
+    } catch let failure as WriteFailure {
+      throw failure
     } catch {
-      // Validation/conflict errors are safe to correct under a new operation ID;
-      // store failures remain explicitly uncertain and are never auto-retried.
-      throw error
+      throw WriteFailure(error as? BridgeFailure ?? .ambiguous, outcome: outcome)
     }
-    clients[id]!.operations[command.operationID] = (encoded, result)
-    clients[id]!.uncertain.remove(command.operationID)
-    return result
   }
   private static func secret(bytes: Int) -> String {
     var random = SystemRandomNumberGenerator()

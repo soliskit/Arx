@@ -6,14 +6,18 @@ export async function checkBrowserOutcomes({ evaluate, until, screenshot }) {
     window.fetch = async (path, options) => {
       const fixture = window.outcomeFixture;
       const body = options?.body ? JSON.parse(options.body) : null;
-      const reply = (status, error) => new Response(JSON.stringify({ error }), { status });
+      const reply = (status, error, writeOutcome = "unknown") => new Response(JSON.stringify({ error, writeOutcome }), { status });
       if (path === "/api/mutate") {
         fixture.commands.push(body);
         if (fixture.mode === "lost") throw Error("Fixture dropped response");
+        if (fixture.mode === "conflict-refused") return reply(409, "Fixture stale conflict", "refused");
+        if (fixture.mode === "committed-unreadable") return reply(409, "Fixture saved but unreadable", "committed");
+        if (fixture.mode === "unknown-400") return reply(400, "Fixture unreadable result");
+        if (fixture.mode === "unknown-429") return reply(429, "Fixture unreadable result");
         if (["active-denial", "unknown-denial", "html-session", "invalid-session"].includes(fixture.mode)) return reply(403, "Fixture item unavailable");
         if (fixture.mode === "html-denial") return new Response("<html>Denied</html>", {status: 403});
-        if (fixture.mode === "refused-400") return reply(400, "Fixture bad fields");
-        if (fixture.mode === "refused-429") return reply(429, "Fixture throttled");
+        if (fixture.mode === "refused-400") return reply(400, "Fixture bad fields", "refused");
+        if (fixture.mode === "refused-429") return reply(429, "Fixture throttled", "refused");
         if (["off-page", "reload-failure", "failed-switch"].includes(fixture.mode)) {
           return new Response(JSON.stringify({ reminder: { id: "off-page-fixture", listID: body.listID, fields: body.fields } }));
         }
@@ -84,28 +88,52 @@ export async function checkBrowserOutcomes({ evaluate, until, screenshot }) {
     await until("!busy");
     assert.match(await status(), /did not confirm.*Check Reminders/);
     const unresolved = await evaluate("JSON.stringify(uncertainWrites)");
+    await mode("conflict-refused");
+    await submit();
+    assert.match(await status(), /Nothing was changed/);
+    assert.equal(await evaluate("JSON.stringify(uncertainWrites)"), unresolved);
+    await screenshot("06g-conflict-refused");
+    await mode("committed-unreadable");
+    await submit();
+    assert.match(
+      await status(),
+      /Change saved, but the result could not be reloaded/,
+    );
+    assert.equal(await evaluate("JSON.stringify(uncertainWrites)"), unresolved);
+    await screenshot("06h-committed-unreadable");
+    const addsUnknown = async (unknown) => {
+      await mode(unknown);
+      const before = await evaluate("uncertainWrites.length");
+      await submit();
+      assert.match(await status(), /may or may not have been saved/);
+      assert.equal(await evaluate("uncertainWrites.length"), before + 1);
+    };
+    await addsUnknown("unknown-400");
+    await addsUnknown("unknown-429");
+    const currentUnresolved = await evaluate("JSON.stringify(uncertainWrites)");
     const retainsUnresolved = async (next) => {
       await mode(next);
       await submit();
       assert.equal(
         await evaluate("JSON.stringify(uncertainWrites)"),
-        unresolved,
+        currentUnresolved,
       );
       await mode("normal");
       await evaluate('document.getElementById("refresh").click()');
       await until("!busy");
       assert.equal(
         await evaluate("JSON.stringify(uncertainWrites)"),
-        unresolved,
+        currentUnresolved,
       );
       assert.match(await status(), /Unresolved writes:.*did not confirm/);
     };
     await retainsUnresolved("off-page");
     await retainsUnresolved("refused-400");
     await retainsUnresolved("refused-429");
+    const beforeNextLost = await evaluate("uncertainWrites.length");
     await mode("lost");
     await submit();
-    assert.equal(await evaluate("uncertainWrites.length"), 2);
+    assert.equal(await evaluate("uncertainWrites.length"), beforeNextLost + 1);
 
     await mode("reload-failure");
     await submit();
