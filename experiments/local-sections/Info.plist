@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.soliskit.ArxSectionsExperiment</string>
+<key>CFBundleExecutable</key><string>experiment</string>
+<key>CFBundleName</key><string>Arx Sections Experiment</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>NSRemindersFullAccessUsageDescription</key><string>Test-only account-free hosted Mac experiment. Check local source types and create at most one temporary list and empty section. No owner account or existing reminder reads.</string>
+</dict></plist>

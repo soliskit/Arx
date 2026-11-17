@@ -1,0 +1,47 @@
+name: Account-free Sections experiment
+on:
+  pull_request:
+    paths:
+      - experiments/local-sections/**
+      - .github/workflows/sections-experiment.yml
+permissions:
+  contents: read
+jobs:
+  local-capability:
+    if: github.head_ref == 'experiment/local-sections-capability'
+    runs-on: xcode-27
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test safety gates and compile isolated experiment
+        run: |
+          set -euo pipefail
+          cd experiments/local-sections
+          clang -std=c11 -Wall -Wextra -Werror gates-test.c -o "$RUNNER_TEMP/sections-gates"
+          "$RUNNER_TEMP/sections-gates"
+          APP="$RUNNER_TEMP/ArxSectionsExperiment.app"
+          mkdir -p "$APP/Contents/MacOS"
+          clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation -framework AppKit -framework EventKit probe.m -o "$APP/Contents/MacOS/experiment"
+          cp Info.plist "$APP/Contents/Info.plist"
+          codesign --force --sign - "$APP"
+          codesign --verify --strict "$APP"
+      - name: Run one bounded account-free default-store probe
+        env:
+          ARX_SECTIONS_EXPERIMENT: approved-once
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/ArxSectionsExperiment.app/Contents/MacOS/experiment" > sections-result.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('sections-result.json')
+          assert p.stat().st_size <= 8192
+          result = json.loads(p.read_text())
+          print(json.dumps(result, indent=2))
+          assert result['outcome']
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: account-free-sections-result
+          path: sections-result.json
