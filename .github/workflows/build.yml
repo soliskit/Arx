@@ -17,10 +17,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Select Xcode 27.2
         run: |
-          if [ -d /Applications/Xcode_27.2.app ]; then
-            sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
+          if [ ! -d /Applications/Xcode_27.2.app ]; then
+            echo 'Xcode 27.2 is required but not present on this runner'
+            exit 1
           fi
+          sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
           xcodebuild -version
+          if ! xcodebuild -version | grep -qFx 'Xcode 27.2'; then
+            echo 'the effective Xcode version is not 27.2'
+            exit 1
+          fi
       - name: Capture the generated workspace lockfile
         run: |
           set -euo pipefail
@@ -106,10 +112,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Select Xcode 27.2
         run: |
-          if [ -d /Applications/Xcode_27.2.app ]; then
-            sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
+          if [ ! -d /Applications/Xcode_27.2.app ]; then
+            echo 'Xcode 27.2 is required but not present on this runner'
+            exit 1
           fi
+          sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
           xcodebuild -version
+          if ! xcodebuild -version | grep -qFx 'Xcode 27.2'; then
+            echo 'the effective Xcode version is not 27.2'
+            exit 1
+          fi
       - name: Resolve the pinned Xcode dependency graph
         run: |
           set -euo pipefail
@@ -236,8 +248,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Select Xcode 27.2
         run: |
-          if [ -d /Applications/Xcode_27.2.app ]; then
-            sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
+          if [ ! -d /Applications/Xcode_27.2.app ]; then
+            echo 'Xcode 27.2 is required but not present on this runner'
+            exit 1
+          fi
+          sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
+          xcodebuild -version
+          if ! xcodebuild -version | grep -qFx 'Xcode 27.2'; then
+            echo 'the effective Xcode version is not 27.2'
+            exit 1
           fi
       - name: Compile and safely probe the fixture display script
         run: |
