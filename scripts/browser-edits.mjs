@@ -76,7 +76,11 @@ export async function checkBrowserEdits({ evaluate, until, screenshot }) {
     );
     await screenshot("05d-malformed-json-not-sent");
     // A time without its date is refused before sending and keeps the editor.
-    await submit('el("due-date").value="";el("due-time").value="09:00"');
+    // The status is cleared before each refusal so the fresh refusal text
+    // proves the submit actually dispatched; leftover text cannot pass it.
+    await submit(
+      'el("status").textContent="";el("due-date").value="";el("due-time").value="09:00"',
+    );
     assert.match(
       await evaluate('el("status").textContent'),
       /A time needs its date/,
@@ -87,8 +91,15 @@ export async function checkBrowserEdits({ evaluate, until, screenshot }) {
       ),
       { ...before, editorOpen: true },
     );
+    // Direct programmatic clears leave WebKit's form validity stale and
+    // silently block later submits. Reopening through the product path
+    // re-asserts the empty controls, the verified restore, so the next
+    // refusal and the final save really dispatch.
+    await evaluate(
+      "openEditor(rows.find(row=>row.id===window.editFixture.original.id))",
+    );
     await submit(
-      'el("due-time").value="";el("start-date").value="";el("start-time").value="17:30"',
+      'el("status").textContent="";el("start-date").value="";el("start-time").value="17:30"',
     );
     assert.match(
       await evaluate('el("status").textContent'),
@@ -98,7 +109,9 @@ export async function checkBrowserEdits({ evaluate, until, screenshot }) {
       await evaluate("window.editFixture.commands.length"),
       before.count,
     );
-    await submit('el("start-time").value=""');
+    await evaluate(
+      "openEditor(rows.find(row=>row.id===window.editFixture.original.id))",
+    );
     await submit(
       'el("alarms").value=\'[ {"relativeOffset":-900} ]\';el("repeats").value=\'[ {"frequency":"daily","interval":1} ]\';el("title").value="Changed text fixture";el("notes").value="";el("location").value=""',
     );
