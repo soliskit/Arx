@@ -201,30 +201,13 @@ struct SectionsWorkerTransportTests {
     defer { artifacts.removeAll() }
     let child = try makeChild(
       """
-      ( exec sleep 15 ) &
+      ( exec sleep 12 ) &
       printf '%s' "$!" > "$(dirname "$0")/descendant.pid"
       cat > /dev/null
       printf '%s' '{"state":"labels","reason":"local_selection_only","lists":[]}'
       exit 0
       """, into: artifacts)
     let pidFile = child.deletingLastPathComponent().appendingPathComponent("descendant.pid")
-    defer {
-      // The fixture owns this descendant: end exactly the recorded PID and
-      // confirm it is gone before the test finishes. No other process matches.
-      guard let text = try? String(contentsOf: pidFile, encoding: .utf8),
-        let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines))
-      else { return }
-      kill(pid, SIGKILL)
-      var gone = false
-      for _ in 0..<80 {
-        if kill(pid, 0) != 0, errno == ESRCH {
-          gone = true
-          break
-        }
-        Thread.sleep(forTimeInterval: 0.025)
-      }
-      #expect(gone)
-    }
     let started = Date()
     let reply = await call(child)
     let elapsed = Date().timeIntervalSince(started)
@@ -233,6 +216,20 @@ struct SectionsWorkerTransportTests {
     #expect(reply.state == "unknown")
     #expect(reply.reason == "timeout")
     #expect(elapsed >= 8 && elapsed < 20)
+    // The fixture owns this descendant: it outlives the parent deadline by two
+    // seconds and then exits on its own. Verify expiry without ever signalling
+    // it, so a reused PID can never catch a blind signal.
+    let pidText = try String(contentsOf: pidFile, encoding: .utf8)
+    let pid = try #require(Int32(pidText.trimmingCharacters(in: .whitespacesAndNewlines)))
+    var gone = false
+    for _ in 0..<200 {
+      if kill(pid, 0) != 0, errno == ESRCH {
+        gone = true
+        break
+      }
+      try await Task.sleep(for: .milliseconds(25))
+    }
+    #expect(gone)
   }
 
   @Test func parentDeadlineStopsRunawayChild() async throws {
