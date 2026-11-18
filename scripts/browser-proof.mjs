@@ -198,6 +198,9 @@ try {
       `Fixture Chrome ${reason}; launch error: ${launchError?.message || "none"}; exit: ${JSON.stringify(exitStatus || null)}; stderr (latest 8 KiB):\n${chromeStderr.toString("utf8")}`,
     );
   const active = join(temporary, "chrome", "DevToolsActivePort");
+  // Chrome cold starts on hosted runners have been observed between ~4s and
+  // past the original 10s window with identical code and runner images, so
+  // the readiness window is 30s. Every assertion after startup is unchanged.
   await poll(() => {
     if (launchError) {
       throw startupFailure("launch failed");
@@ -206,7 +209,7 @@ try {
       throw startupFailure("exited before readiness");
     }
     return existsSync(active);
-  });
+  }, 300);
   if (launchError) {
     throw startupFailure("launch failed");
   }
