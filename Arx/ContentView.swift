@@ -16,8 +16,10 @@ struct ContentView: View {
     NavigationSplitView {
       VStack(alignment: .leading, spacing: 12) {
         if model.fixture {
-          Text("Fixture data - no real Reminders access").font(.caption).foregroundStyle(.primary)
-            .padding(.horizontal, 6).padding(.vertical, 2).background(.background, in: .capsule)
+          Text("Fixture data - no real Reminders access").font(.caption).foregroundStyle(
+            Color(nsColor: .labelColor)
+          )
+          .padding(.horizontal, 6).padding(.vertical, 2).background(.background, in: .capsule)
         }
         if model.connected {
           List(model.lists, selection: $highlighted) { list in
@@ -59,7 +61,8 @@ struct ContentView: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 20) {
           Text("Arx bridge").font(.largeTitle)
-          Text(model.message).foregroundStyle(.primary).accessibilityIdentifier("bridge-status")
+          Text(model.message).foregroundStyle(Color(nsColor: .labelColor)).accessibilityIdentifier(
+            "bridge-status")
           GroupBox("Connection") {
             VStack(alignment: .leading, spacing: 10) {
               TextField("Exact remote HTTPS origin", text: $model.origin).textContentType(.URL)
