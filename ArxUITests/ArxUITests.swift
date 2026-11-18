@@ -49,6 +49,14 @@ final class ArxUITests: XCTestCase {
   @MainActor
   func testAccessibilityAudit() throws {
     XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
-    try app.performAccessibilityAudit()
+    // Collect every issue with its full description before failing; the
+    // thrown error names only the issue type ("Parent/Child mismatch"),
+    // never the element.
+    var issues: [String] = []
+    try app.performAccessibilityAudit { issue in
+      issues.append(String(describing: issue))
+      return true
+    }
+    XCTAssertTrue(issues.isEmpty, issues.joined(separator: "\n---\n"))
   }
 }
