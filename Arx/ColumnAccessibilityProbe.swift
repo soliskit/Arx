@@ -12,9 +12,14 @@ import SwiftUI
 /// view. AppKit NSView accessibility and SwiftUI's generated AX tree are
 /// documented as separate layers, and modifiers on our own content do not
 /// reach those containers; the accessibility audit flags undescribed groups
-/// in that area of the tree. Whether a labeled container is the flagged AX
-/// Group's owner is decided by the strict audit and the identifier-based AX
-/// corroboration in the UI tests - not assumed here.
+/// in that area of the tree. AppKit ignores plain NSViews by default, so a
+/// description installed on a container only participates in the AX tree
+/// once the container itself is exposed as an accessibility element. The
+/// probe never assigns a role: the exposed element keeps whatever role
+/// AppKit derives, and the UI tests observe by identifier across all roles.
+/// A current audit finding is bound to an owned container only when the
+/// finding's own element carries the installed identifier; ownership of any
+/// previously flagged object is never inferred.
 ///
 /// The probe sits inside its own column, so walking up the superview chain
 /// reaches exactly the container hosting that column: the first ancestor that
@@ -34,8 +39,10 @@ import SwiftUI
 /// while the current value still equals the installed one) before the new
 /// target is inspected. An existing value - even one equal to the probe's -
 /// is never adopted as the probe's own. Children, frames, visibility, and
-/// accessibility-element flags are never touched. The probe is a plain NSView
-/// in background layout.
+/// roles are never touched. Each target's accessibility-element flag is set
+/// to true only when it is currently false, under the same per-property
+/// exact-original tracking as the label and identifier. The probe is a plain
+/// NSView in background layout.
 struct ColumnAccessibilityProbe: NSViewRepresentable {
   enum Column {
     case sidebar
@@ -58,6 +65,13 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
       case .detail: return "column-detail"
       }
     }
+
+    var token: String {
+      switch self {
+      case .sidebar: return "sidebar"
+      case .detail: return "detail"
+      }
+    }
   }
 
   let column: Column
@@ -67,6 +81,8 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
     var observedColumn: Column?
     var labelChange: (original: String?, installed: String)?
     var identifierChange: (original: String, installed: String)?
+    var elementChange: (original: Bool, installed: Bool)?
+    var targetRecordEmitted = false
     var generation: UInt = 0
   }
 
@@ -106,11 +122,17 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
       {
         target.setAccessibilityIdentifier(change.original)
       }
+      if let change = coordinator.elementChange,
+        target.isAccessibilityElement() == change.installed
+      {
+        target.setAccessibilityElement(change.original)
+      }
     }
     coordinator.observed = nil
     coordinator.observedColumn = nil
     coordinator.labelChange = nil
     coordinator.identifierChange = nil
+    coordinator.elementChange = nil
   }
 
   private func labelContainer(for view: NSView, column: Column, coordinator: Coordinator) {
@@ -145,6 +167,11 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
       {
         coordinator.identifierChange = nil
       }
+      if let change = coordinator.elementChange,
+        container.isAccessibilityElement() != change.installed
+      {
+        coordinator.elementChange = nil
+      }
       return
     }
     // A different target, a different column on it, or the first inspection:
@@ -163,5 +190,52 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
       container.setAccessibilityIdentifier(column.identifier)
       coordinator.identifierChange = (original: existingIdentifier, installed: column.identifier)
     }
+    let elementBefore = container.isAccessibilityElement()
+    let roleBefore = Self.roleToken(container)
+    if elementBefore == false {
+      container.setAccessibilityElement(true)
+      coordinator.elementChange = (original: false, installed: true)
+    }
+    Self.emitTargetRecord(
+      column: column, container: container, coordinator: coordinator,
+      elementBefore: elementBefore, roleBefore: roleBefore)
+  }
+
+  /// Maps the observed role to a fixed token. Raw role strings never leave
+  /// the process; anything outside the known set reports as `other`.
+  private static func roleToken(_ view: NSView) -> String {
+    guard let role = view.accessibilityRole() else { return "none" }
+    switch role {
+    case .group: return "group"
+    case .splitGroup: return "splitGroup"
+    case .unknown: return "unknown"
+    default: return "other"
+    }
+  }
+
+  /// Bounded per-target observation record, emitted at most once per
+  /// Coordinator instance (one probe per column; in practice one episode per
+  /// column per launch) and only in the DEBUG fixture dump configuration:
+  /// fixed column token, booleans and closed role tokens, never strings,
+  /// frames or addresses. Equality against the installed values is computed
+  /// here; only booleans print.
+  private static func emitTargetRecord(
+    column: Column, container: NSView, coordinator: Coordinator,
+    elementBefore: Bool, roleBefore: String
+  ) {
+    #if DEBUG
+      let arguments = ProcessInfo.processInfo.arguments
+      guard !coordinator.targetRecordEmitted,
+        arguments.contains("--bridge-fixtures"),
+        arguments.contains("--arx-dump-view-hierarchy")
+      else { return }
+      coordinator.targetRecordEmitted = true
+      let elementAfter = container.isAccessibilityElement()
+      let idInstalled = container.accessibilityIdentifier() == column.identifier
+      let labelInstalled = container.accessibilityLabel() == column.label
+      print(
+        "column-probe-target: \(column.token) elementBefore=\(elementBefore) elementAfter=\(elementAfter) roleBefore=\(roleBefore) roleAfter=\(Self.roleToken(container)) idInstalled=\(idInstalled) labelInstalled=\(labelInstalled)"
+      )
+    #endif
   }
 }

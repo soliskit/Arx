@@ -65,6 +65,7 @@ final class ArxUITests: XCTestCase {
     // observation found, and one combined assertion reports everything at
     // the end. No defer: XCTest failure unwinding can skip deferred work.
     var issues = columnContainerFindings(application)
+    issues.append(contentsOf: controlInventoryFindings(application))
     // Collect every issue with its full description and element details
     // before failing; the thrown error names only the issue type
     // ("Parent/Child mismatch"), never the element.
@@ -73,8 +74,17 @@ final class ArxUITests: XCTestCase {
     // pngRepresentation forces the capture now, before the audit runs
     // (XCUIScreenshot's documented PNG data property on macOS).
     let auditPNG = application.screenshot().pngRepresentation
+    let installedIdentifiers: Set<String> = ["column-sidebar", "column-detail"]
     try application.performAccessibilityAudit { issue in
       var line = String(describing: issue)
+      // Fixed token only: whether THIS issue's element carries one of the
+      // probe-installed identifiers. This is the only sanctioned binding
+      // between a finding and an owned view - element identity, never
+      // label or frame coincidence.
+      let matchesInstalled =
+        issue.element.map { installedIdentifiers.contains($0.identifier) } ?? false
+      line += " | matches-installed-id:\(matchesInstalled)"
+
       if let element = issue.element {
         line +=
           " | identifier:\(element.identifier) label:\(element.label) frame:\(element.frame) type:\(element.elementType.rawValue)"
@@ -89,6 +99,7 @@ final class ArxUITests: XCTestCase {
     let artifacts = URL(fileURLWithPath: "/tmp/uitest-artifacts")
     try? FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
     try? auditPNG.write(to: artifacts.appendingPathComponent("audit-window.png"))
+    issues.append(contentsOf: grantToggleFindings(application))
     XCTAssertTrue(issues.isEmpty, issues.joined(separator: "\n---\n"))
   }
 
@@ -105,6 +116,173 @@ final class ArxUITests: XCTestCase {
   /// only because this fixture run is known to execute in English - and the
   /// known content must sit somewhere INSIDE the group: containment, not a
   /// direct-parent claim.
+  /// Same-instance passive control inventory. The list covers ONLY these 19
+  /// controls - the interactive set observed in the audit instance's own AX
+  /// tree in the baseline runs - not every AX control (scroll chrome and any
+  /// newly added controls are outside it). Existence, uniqueness and enabled
+  /// state are asserted against that measured debug baseline, which is a
+  /// fixture regression expectation, not a cross-version contract. This step
+  /// proves reachability observations only; operability is proven separately
+  /// for the three grant checkboxes after the audit. Output is fixed tokens
+  /// and booleans only.
+  private func controlInventoryFindings(_ application: XCUIApplication) -> [String] {
+    struct Control {
+      let token: String
+      let query: (XCUIApplication) -> XCUIElementQuery
+      let expectedEnabled: Bool
+    }
+    func byLabel(_ label: String) -> NSPredicate {
+      NSPredicate(format: "label == %@", label)
+    }
+    func byPlaceholder(_ text: String) -> NSPredicate {
+      NSPredicate(format: "placeholderValue == %@", text)
+    }
+    let controls: [Control] = [
+      Control(
+        token: "grant-inbox",
+        query: { $0.checkBoxes.matching(identifier: "list-grant-inbox") },
+        expectedEnabled: true),
+      Control(
+        token: "grant-weekend",
+        query: { $0.checkBoxes.matching(identifier: "list-grant-weekend") },
+        expectedEnabled: true),
+      Control(
+        token: "grant-later",
+        query: { $0.checkBoxes.matching(identifier: "list-grant-later") },
+        expectedEnabled: true),
+      Control(
+        token: "grant-readonly",
+        query: { $0.checkBoxes.matching(identifier: "list-grant-readonly") },
+        expectedEnabled: true),
+      Control(
+        token: "refresh-lists",
+        query: { $0.buttons.matching(byLabel("Refresh lists")) },
+        expectedEnabled: true),
+      Control(
+        token: "origin-field",
+        query: { $0.textFields.matching(byPlaceholder("Exact remote HTTPS origin")) },
+        expectedEnabled: true),
+      Control(
+        token: "port-field",
+        query: { $0.textFields.matching(byPlaceholder("Local port")) },
+        expectedEnabled: true),
+      Control(
+        token: "bridge-start",
+        query: { $0.buttons.matching(identifier: "bridge-start") },
+        expectedEnabled: true),
+      Control(
+        token: "bridge-stop",
+        query: { $0.buttons.matching(identifier: "bridge-stop") },
+        expectedEnabled: false),
+      Control(
+        token: "client-label-field",
+        query: { $0.textFields.matching(byPlaceholder("Client label")) },
+        expectedEnabled: true),
+      Control(
+        token: "rights-read",
+        query: { $0.checkBoxes.matching(byLabel("Read selected lists")) },
+        expectedEnabled: true),
+      Control(
+        token: "rights-manage",
+        query: { $0.checkBoxes.matching(byLabel("Create, edit, move, complete and reopen")) },
+        expectedEnabled: false),
+      Control(
+        token: "rights-delete",
+        query: { $0.checkBoxes.matching(byLabel("Delete reminders with confirmation")) },
+        expectedEnabled: false),
+      Control(
+        token: "pair-create",
+        query: { $0.buttons.matching(byLabel("Create single-use pairing secret")) },
+        expectedEnabled: false),
+      Control(
+        token: "refresh-client-status",
+        query: { $0.buttons.matching(byLabel("Refresh client status")) },
+        expectedEnabled: true),
+      Control(
+        token: "hide-sidebar",
+        query: { $0.buttons.matching(byLabel("Hide Sidebar")) },
+        expectedEnabled: true),
+      Control(
+        token: "window-close",
+        query: { $0.buttons.matching(identifier: "_XCUI:CloseWindow") },
+        expectedEnabled: true),
+      Control(
+        token: "window-minimize",
+        query: { $0.buttons.matching(identifier: "_XCUI:MinimizeWindow") },
+        expectedEnabled: true),
+      Control(
+        token: "window-fullscreen",
+        query: { $0.buttons.matching(identifier: "_XCUI:FullScreenWindow") },
+        expectedEnabled: true),
+    ]
+    var findings: [String] = []
+    for control in controls {
+      let matches = control.query(application)
+      let count = matches.count
+      var exists = false
+      var enabledMatches = false
+      if count == 1 {
+        let element = matches.firstMatch
+        exists = element.waitForExistence(timeout: 2)
+        if exists {
+          enabledMatches = element.isEnabled == control.expectedEnabled
+        }
+      }
+      print(
+        "control observation: \(control.token) count=\(count) exists=\(exists) enabledMatchesExpected=\(enabledMatches)"
+      )
+      if count != 1 {
+        findings.append("control: \(control.token) expected exactly one match, found \(count)")
+      } else if !exists {
+        findings.append("control: \(control.token) not reachable")
+      } else if !enabledMatches {
+        findings.append(
+          "control: \(control.token) enabled state changed from the measured baseline")
+      }
+    }
+    return findings
+  }
+
+  /// Operability proof for the three togglable grant checkboxes, run AFTER
+  /// the audit and after the screenshot is persisted, so it cannot change
+  /// the state the audit measures. Each checkbox is exercised only when it
+  /// is uniquely matched, existing, enabled, hittable and its current value
+  /// is a known 0 or 1; the ACTUAL original value is restored and verified,
+  /// never a hardcoded one. Any unsafe condition is reported, not clicked.
+  private func grantToggleFindings(_ application: XCUIApplication) -> [String] {
+    var findings: [String] = []
+    for identifier in ["list-grant-inbox", "list-grant-weekend", "list-grant-later"] {
+      let matches = application.checkBoxes.matching(identifier: identifier)
+      guard matches.count == 1 else {
+        findings.append("toggle: \(identifier) not uniquely matched, skipped")
+        continue
+      }
+      let checkbox = matches.firstMatch
+      guard checkbox.exists, checkbox.isEnabled, checkbox.isHittable,
+        let original = checkbox.value as? Int, original == 0 || original == 1
+      else {
+        findings.append("toggle: \(identifier) unsafe to exercise, skipped")
+        continue
+      }
+      checkbox.click()
+      let toggled = checkbox.value as? Int
+      if toggled != 1 - original {
+        findings.append("toggle: \(identifier) value did not change on click")
+      }
+      if checkbox.value as? Int != original {
+        checkbox.click()
+      }
+      let restored = checkbox.value as? Int == original
+      print(
+        "control observation: \(identifier) toggled=\(toggled == 1 - original) restored=\(restored)"
+      )
+      if !restored {
+        findings.append("toggle: \(identifier) original state not restored")
+      }
+    }
+    return findings
+  }
+
   private func columnContainerFindings(_ application: XCUIApplication) -> [String] {
     let expected: [(token: String, identifier: String, label: String, child: String)] = [
       ("sidebar", "column-sidebar", "Lists to share", "list-grant-inbox"),
@@ -112,30 +290,39 @@ final class ArxUITests: XCTestCase {
     ]
     var findings: [String] = []
     for entry in expected {
-      let matches = application.groups.matching(
+      // Identifier query across ALL element types: the candidate no longer
+      // assigns a role, so the observation must not assume one. Only a
+      // bounded count, a closed role token and booleans leave the test.
+      let matches = application.descendants(matching: .any).matching(
         NSPredicate(format: "identifier == %@", entry.identifier))
       let count = matches.count
       var labelMatchesExpected = false
       var containsExpectedChild = false
+      var roleToken = "absent"
       if count == 1 {
-        let group = matches.firstMatch
-        labelMatchesExpected = group.label == entry.label
-        containsExpectedChild = group.descendants(matching: .any)[entry.child].exists
+        let element = matches.firstMatch
+        labelMatchesExpected = element.label == entry.label
+        containsExpectedChild = element.descendants(matching: .any)[entry.child].exists
+        switch element.elementType {
+        case .group: roleToken = "group"
+        case .staticText: roleToken = "staticText"
+        default: roleToken = "other"
+        }
       }
       print(
-        "column probe observation: \(entry.token) count=\(count) labelMatchesExpected=\(labelMatchesExpected) containsExpectedChild=\(containsExpectedChild)"
+        "column probe observation: \(entry.token) count=\(count) role=\(roleToken) labelMatchesExpected=\(labelMatchesExpected) containsExpectedChild=\(containsExpectedChild)"
       )
       if count != 1 {
         findings.append(
-          "column probe: \(entry.token) expected exactly one AX group, found \(count)")
+          "column probe: \(entry.token) expected exactly one AX element, found \(count)")
       } else {
         if !labelMatchesExpected {
           findings.append(
-            "column probe: \(entry.token) AX group label did not match the expected label")
+            "column probe: \(entry.token) AX element label did not match the expected label")
         }
         if !containsExpectedChild {
           findings.append(
-            "column probe: \(entry.token) AX group does not contain the expected child")
+            "column probe: \(entry.token) AX element does not contain the expected child")
         }
       }
     }
