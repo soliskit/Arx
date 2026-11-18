@@ -89,7 +89,10 @@ const evaluate = async (expression) => {
   try {
     value = await executeAsync(`(async () => { return (${expression}\n); })()`);
   } catch (error) {
-    if (!/SyntaxError/.test(String(error))) {
+    // A multi-statement program breaks the expression wrap; safaridriver
+    // reports the parse failure as a javascript error naming the token,
+    // not as a SyntaxError, so match the driver's wording too.
+    if (!/SyntaxError|Unexpected token|Parse error/.test(String(error))) {
       throw error;
     }
     value = await executeAsync(`(async () => { ${expression}\n; })()`);

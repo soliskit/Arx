@@ -255,7 +255,10 @@ jobs:
       - name: Resolve the pinned Xcode dependency graph
         run: xcodebuild -resolvePackageDependencies -project Arx.xcodeproj -scheme Arx -onlyUsePackageVersionsFromResolvedFile
       - name: Run the fixture UI tests
-        run: xcodebuild test -project Arx.xcodeproj -scheme Arx -destination 'platform=macOS' -only-testing:ArxUITests -derivedDataPath .build-ui-tests -resultBundlePath ui-tests.xcresult
+        # The runner's macOS 27.0.1 cannot execute bundles targeting the
+        # project's 27.2 deployment target; lower the target for this test
+        # invocation only (a command-line build setting overrides every target).
+        run: xcodebuild test -project Arx.xcodeproj -scheme Arx -destination 'platform=macOS' -only-testing:ArxUITests -derivedDataPath .build-ui-tests -resultBundlePath ui-tests.xcresult MACOSX_DEPLOYMENT_TARGET=27.0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
