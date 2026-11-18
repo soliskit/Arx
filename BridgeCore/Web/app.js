@@ -356,10 +356,15 @@ function openEditor(item) {
     const time = f[name] ? formatTime(f[name]) : "";
     el(`${name}-date`).value = date;
     el(`${name}-time`).value = time;
-    // WebKit keeps a date/time control invalid after one programmatic clear
-    // of a real value, blocking the form's submit; clearing again resets it.
-    if (!date) el(`${name}-date`).value = "";
-    if (!time) el(`${name}-time`).value = "";
+    // Observed in WebKit: after one programmatic clear of a real date/time
+    // value the form's validity stays stale and blocks the submit event;
+    // clearing again makes validity consistent and lets the submit dispatch.
+    if (!date) {
+      el(`${name}-date`).value = "";
+    }
+    if (!time) {
+      el(`${name}-time`).value = "";
+    }
   }
   el("alarms").value = JSON.stringify(f.alarms, null, 2);
   el("repeats").value = JSON.stringify(f.repeats, null, 2);
