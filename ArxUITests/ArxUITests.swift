@@ -49,16 +49,17 @@ final class ArxUITests: XCTestCase {
   @MainActor
   func testAccessibilityAudit() throws {
     XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
+    let application = app!
     // Collect every issue with its full description and element details
     // before failing; the thrown error names only the issue type
     // ("Parent/Child mismatch"), never the element.
     var issues: [String] = []
     // Capture the render the audit measures so contrast findings can be
-    // checked against the actual pixels (window key state, dimming).
-    // pngData forces the capture now; a screenshot proxy would capture lazily
-    // at write time, after the audit has run.
-    let auditPNG = app.screenshot().pngData
-    try app.performAccessibilityAudit { issue in
+    // checked against the actual pixels (window key state, dimming). The
+    // pngRepresentation forces the capture now, before the audit runs
+    // (XCUIScreenshot's documented PNG data property on macOS).
+    let auditPNG = application.screenshot().pngRepresentation
+    try application.performAccessibilityAudit { issue in
       var line = String(describing: issue)
       if let element = issue.element {
         line +=
@@ -66,7 +67,7 @@ final class ArxUITests: XCTestCase {
       } else {
         // A nil element gives no location; the tree is the only way to find
         // the mismatch.
-        line += " | tree:\n" + app.debugDescription
+        line += " | tree:\n" + application.debugDescription
       }
       issues.append(line)
       return true
