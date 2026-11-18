@@ -27,6 +27,9 @@ const chrome =
     : "/usr/bin/chromium");
 let proxy, browser, server, ws, send, primaryError, cleanupError;
 let logs = "";
+// Browser-side errors surface in failure.txt; the fixture server logs only at
+// critical level, so a page error is otherwise invisible in the evidence.
+let browserLog = "";
 let startup;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const poll = async (check, attempts = 100) => {
@@ -238,6 +241,13 @@ try {
       const { r, j } = pending.get(m.id);
       pending.delete(m.id);
       m.error ? j(Error(JSON.stringify(m.error))) : r(m.result);
+    } else if (m.method === "Runtime.exceptionThrown") {
+      browserLog += `exception: ${m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text}\n`;
+    } else if (
+      m.method === "Runtime.consoleAPICalled" &&
+      m.params.type === "error"
+    ) {
+      browserLog += `console.error: ${m.params.args.map((a) => a.value ?? a.description ?? a.type).join(" ")}\n`;
     }
   });
   send = (method, params = {}) =>
@@ -279,6 +289,7 @@ try {
     writeFileSync(join(evidence, `${name}.png`), Buffer.from(data, "base64"));
   };
   await send("Page.enable");
+  await send("Runtime.enable");
   await send("Page.addScriptToEvaluateOnNewDocument", {
     source: `const originalInterval = window.setInterval.bind(window);
       window.setInterval = (callback, delay, ...args) => {
@@ -598,7 +609,10 @@ try {
 } catch (error) {
   primaryError = error;
   process.stderr.write(`${String(error)}\n`);
-  writeFileSync(join(evidence, "failure.txt"), `${String(error)}\n${logs}`);
+  writeFileSync(
+    join(evidence, "failure.txt"),
+    `${String(error)}\n${browserLog}${logs}`,
+  );
 } finally {
   startup?.write(join(evidence, "startup.json"));
   const cleanupFailures = [];
