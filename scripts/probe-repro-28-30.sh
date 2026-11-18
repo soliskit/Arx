@@ -14,11 +14,15 @@ OUT="repro-probes.txt"
 : > "${OUT}"
 PID=""
 SECRET=""
+PAIR_HEADERS=""
+PAIR_BODY=""
 cleanup() {
   if [[ -n "${PID}" ]] && kill -0 "${PID}" 2>/dev/null; then
     kill "${PID}" 2>/dev/null || true
     wait "${PID}" 2>/dev/null || true
   fi
+  [[ -n "${PAIR_HEADERS}" ]] && rm -f "${PAIR_HEADERS}"
+  [[ -n "${PAIR_BODY}" ]] && rm -f "${PAIR_BODY}"
   # Clear only the fixture-owned pairing secret, and only while the pasteboard
   # still holds exactly it; never erase unrelated clipboard contents.
   if [[ -n "${SECRET}" ]] && [[ "$(pbpaste 2>/dev/null || true)" == "${SECRET}" ]]; then
@@ -190,10 +194,15 @@ echo "== #30(a): client status before and after manual refresh ==" >>"${OUT}"
 native setfield 2 1 "Browser client"
 native press 2 1
 sleep 1
+BASELINE_CLIENTS=$(native clients 2>&1)
 {
   echo "client rows BEFORE pair exchange (baseline):"
-  native clients
+  echo "${BASELINE_CLIENTS}"
 } >>"${OUT}" 2>&1
+if [[ "${BASELINE_CLIENTS}" != *"Browser client"* || "${BASELINE_CLIENTS}" != *"Awaiting pairing"* ]]; then
+  echo "HARNESS FAILURE: baseline client row for the new client is missing or not awaiting pairing" >>"${OUT}"
+  exit 1
+fi
 native press 2 2
 SECRET=$(pbpaste)
 if [[ -z "${SECRET}" ]]; then
@@ -209,26 +218,49 @@ HTTP_CODE=$(curl -sS --max-time 15 -D "${PAIR_HEADERS}" -o "${PAIR_BODY}" -w '%{
   -H "Content-Type: application/json" \
   -d "{\"secret\":\"${SECRET}\"}" \
   http://127.0.0.1:8765/api/pair) || HTTP_CODE="curl-failed"
-ADMITTED=0
-if [[ "${HTTP_CODE}" == "200" ]] && grep -q '"csrf"' "${PAIR_BODY}" && grep -q '"rights"' "${PAIR_BODY}" && grep -qi '^set-cookie: __Host-arx=' "${PAIR_HEADERS}"; then
-  ADMITTED=1
+COOKIE_OK=0
+if grep -qiE '^set-cookie: __Host-arx=[^;[:space:]]+' "${PAIR_HEADERS}"; then
+  COOKIE_OK=1
+fi
+JSON_OK=0
+if python3 - "${PAIR_BODY}" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1]) as handle:
+        body = json.load(handle)
+except Exception:
+    sys.exit(1)
+csrf = body.get("csrf") if isinstance(body, dict) else None
+rights = body.get("rights") if isinstance(body, dict) else None
+ok = isinstance(csrf, str) and len(csrf) > 0 and isinstance(rights, dict) and len(rights) > 0
+sys.exit(0 if ok else 1)
+PY
+then
+  JSON_OK=1
 fi
 rm -f "${PAIR_HEADERS}" "${PAIR_BODY}"
-if [[ "${ADMITTED}" -ne 1 ]]; then
+PAIR_HEADERS=""
+PAIR_BODY=""
+if [[ "${HTTP_CODE}" != "200" || "${COOKIE_OK}" -ne 1 || "${JSON_OK}" -ne 1 ]]; then
   echo "HARNESS FAILURE: pair exchange not admitted (HTTP ${HTTP_CODE}); response contents withheld" >>"${OUT}"
   exit 1
 fi
 {
-  echo "pair exchange admitted: HTTP 200 with the session response shape and a session cookie; values withheld"
+  echo "pair exchange admitted: HTTP 200, typed session response (non-empty csrf string and rights object), non-empty session cookie; values withheld"
   echo "client rows AFTER pair exchange, BEFORE manual refresh:"
   native clients
 } >>"${OUT}" 2>&1
 native press 3 1
 sleep 1
+POST_REFRESH=$(native clients 2>&1)
 {
   echo "client rows AFTER manual refresh:"
-  native clients
+  echo "${POST_REFRESH}"
 } >>"${OUT}" 2>&1
+if [[ "${POST_REFRESH}" != *"Browser client"* || "${POST_REFRESH}" != *"Paired"* ]]; then
+  echo "HARNESS FAILURE: refreshed client row does not show the admitted pairing" >>"${OUT}"
+  exit 1
+fi
 echo "== #30(b): status message across a simulated store change (status-overwrite facet only; the synthetic stopping state is NOT a real listener bind failure) ==" >>"${OUT}"
 launch --fixture-stopping --fixture-store-change
 BEFORE_SNAP=""
