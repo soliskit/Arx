@@ -155,6 +155,9 @@ jobs:
           assert app.get('version') == root.get('version'), 'workspace lockfile format version differs'
           print(f'root lockfile exact; workspace pins match the approved root set minus tool pin {TOOL_PIN}')
           PYTHON
+          # The tracked lockfiles must already be what resolution produces: after the
+          # pinned and plain resolves, neither file may show any change.
+          git diff --exit-code -- Package.resolved Arx.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
       - name: Verify Mac-only target settings
         run: |
           set -euo pipefail
