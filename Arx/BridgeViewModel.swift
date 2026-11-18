@@ -41,6 +41,12 @@ import Observation
         stopping = true
         message = "Access revoked. Waiting for the local listener to stop."
       }
+      if ProcessInfo.processInfo.arguments.contains("--fixture-store-change") {
+        // Diagnostic only: simulate an external Reminders change notification.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+          NotificationCenter.default.post(name: .EKEventStoreChanged, object: nil)
+        }
+      }
     }
     observer = NotificationCenter.default.addObserver(
       forName: .EKEventStoreChanged, object: nil, queue: .main

@@ -283,6 +283,37 @@ jobs:
             navigation-accessibility.txt
             navigation-elements.txt
 
+  repro-probes:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 27.2
+        run: |
+          if [ -d /Applications/Xcode_27.2.app ]; then
+            sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
+          fi
+      - name: Compile and safely probe the fixture display script
+        run: |
+          set -euo pipefail
+          swiftc -typecheck scripts/fixture-display.swift
+          status=0
+          CI=false swift scripts/fixture-display.swift scripts/probe-repro-28-30.sh > "$RUNNER_TEMP/fixture-display-probe.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/fixture-display-probe.log"
+          test "$status" -eq 1
+          grep -Fq 'Display setup is restricted to CI.' "$RUNNER_TEMP/fixture-display-probe.log"
+      - name: Resolve the pinned Xcode dependency graph
+        run: xcodebuild -resolvePackageDependencies -project Arx.xcodeproj -scheme Arx -onlyUsePackageVersionsFromResolvedFile
+      - name: Build the app
+        run: xcodebuild build -project Arx.xcodeproj -scheme Arx -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO -derivedDataPath .build
+      - name: Run the reproduction probes
+        run: bash scripts/probe-repro-28-30.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arx-repro-probes
+          path: repro-probes.txt
+
   browser-proof:
     runs-on: ubuntu-22.04
     steps:

@@ -73,7 +73,7 @@ end optionalAttribute
 on describeNode(node)
   log node
   local attributeName, found
-  repeat with keyRef in {"AXRole", "AXIdentifier", "AXTitle", "AXDescription", "AXValue", "AXEnabled"}
+  repeat with keyRef in {"AXRole", "AXIdentifier", "AXTitle", "AXDescription", "AXLabel", "AXHelp", "AXValue", "AXEnabled"}
     set attributeName to contents of keyRef
     try
       set found to my attributeValue(node, attributeName)
