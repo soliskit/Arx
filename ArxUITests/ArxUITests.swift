@@ -49,14 +49,31 @@ final class ArxUITests: XCTestCase {
   @MainActor
   func testAccessibilityAudit() throws {
     XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
-    // Collect every issue with its full description before failing; the
-    // thrown error names only the issue type ("Parent/Child mismatch"),
-    // never the element.
+    // Collect every issue with its full description and element details
+    // before failing; the thrown error names only the issue type
+    // ("Parent/Child mismatch"), never the element.
     var issues: [String] = []
+    // Capture the render the audit measures so contrast findings can be
+    // checked against the actual pixels (window key state, dimming).
+    // pngData forces the capture now; a screenshot proxy would capture lazily
+    // at write time, after the audit has run.
+    let auditPNG = app.screenshot().pngData
     try app.performAccessibilityAudit { issue in
-      issues.append(String(describing: issue))
+      var line = String(describing: issue)
+      if let element = issue.element {
+        line +=
+          " | identifier:\(element.identifier) label:\(element.label) frame:\(element.frame) type:\(element.elementType.rawValue)"
+      } else {
+        // A nil element gives no location; the tree is the only way to find
+        // the mismatch.
+        line += " | tree:\n" + app.debugDescription
+      }
+      issues.append(line)
       return true
     }
+    let artifacts = URL(fileURLWithPath: "/tmp/uitest-artifacts")
+    try? FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
+    try? auditPNG.write(to: artifacts.appendingPathComponent("audit-window.png"))
     XCTAssertTrue(issues.isEmpty, issues.joined(separator: "\n---\n"))
   }
 }

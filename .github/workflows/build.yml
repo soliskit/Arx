@@ -263,7 +263,9 @@ jobs:
         if: always()
         with:
           name: arx-ui-tests
-          path: ui-tests.xcresult
+          path: |
+            ui-tests.xcresult
+            /tmp/uitest-artifacts/
 
   safari-proof:
     needs: changes

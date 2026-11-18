@@ -387,6 +387,12 @@ try {
         'el("edit-form")?JSON.stringify([...el("edit-form").elements].filter((c)=>typeof c.checkValidity==="function"&&!c.checkValidity()).map((c)=>c.id)):"<no form>"',
       editorError:
         'document.getElementById("editor-error")?document.getElementById("editor-error").textContent:null',
+      dueDateState:
+        'el("due-date")?JSON.stringify({value:el("due-date").value,validity:{valueMissing:el("due-date").validity.valueMissing,badInput:el("due-date").validity.badInput,typeMismatch:el("due-date").validity.typeMismatch,stepMismatch:el("due-date").validity.stepMismatch,rangeUnderflow:el("due-date").validity.rangeUnderflow,rangeOverflow:el("due-date").validity.rangeOverflow,customError:el("due-date").validity.customError,valid:el("due-date").validity.valid}}):"<no due-date>"',
+      dueTimeState:
+        'el("due-time")?JSON.stringify({value:el("due-time").value,validity:{valueMissing:el("due-time").validity.valueMissing,badInput:el("due-time").validity.badInput,typeMismatch:el("due-time").validity.typeMismatch,stepMismatch:el("due-time").validity.stepMismatch,rangeUnderflow:el("due-time").validity.rangeUnderflow,rangeOverflow:el("due-time").validity.rangeOverflow,customError:el("due-time").validity.customError,valid:el("due-time").validity.valid}}):"<no due-time>"',
+      startDateState:
+        'el("start-date")?JSON.stringify({value:el("start-date").value,valid:el("start-date").validity.valid}):"<no start-date>"',
       savedReminder:
         'typeof rows==="undefined"?"<undef>":JSON.stringify(rows.filter((r)=>r.fields.title&&r.fields.title.indexOf("Line one")>=0).map((r)=>({id:r.id,priority:r.fields.priority})))',
     };
@@ -402,6 +408,27 @@ try {
         }),
       Promise.resolve(),
     );
+    // Remedy check on the still-open editor: if the date/time controls are
+    // invalid only because WebKit kept their state after one programmatic
+    // clear, clearing again restores validity and lets the submit dispatch.
+    // This verifies the externally reported workaround in the actual failing
+    // page before any product change is proposed.
+    try {
+      const remedy = await evaluate(`(() => {
+        const out = { before: { dateValid: el("due-date").validity.valid, timeValid: el("due-time").validity.valid, formValid: el("edit-form").checkValidity(), submits: window.__arxSubmitCount ?? null } };
+        el("due-date").value = ""; el("due-date").value = "";
+        el("due-time").value = ""; el("due-time").value = "";
+        out.after = { dateValid: el("due-date").validity.valid, timeValid: el("due-time").validity.valid, formValid: el("edit-form").checkValidity() };
+        el("edit-form").requestSubmit();
+        out.submitsAfter = window.__arxSubmitCount ?? null;
+        return JSON.stringify(out);
+      })()`);
+      pageState += `remedyExperiment: ${remedy}
+`;
+    } catch (remedyError) {
+      pageState += `remedyExperiment: <failed: ${String(remedyError).slice(0, 300)}>
+`;
+    }
   }
   writeFileSync(
     join(evidence, "failure.txt"),
