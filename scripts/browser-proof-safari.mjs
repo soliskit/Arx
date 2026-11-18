@@ -317,6 +317,12 @@ try {
     '!document.getElementById("reminders").textContent.includes("<img src=x onerror=alert(1)>")',
   );
   assert.equal(await evaluate("document.activeElement?.id"), "new");
+  // Count submit events at the page level so a failed edits suite shows
+  // whether requestSubmit ever dispatched (versus a handler that ran but
+  // whose fetch the suite's wrapper could not observe).
+  await evaluate(
+    'window.__arxSubmitCount=0;document.getElementById("edit-form").addEventListener("submit",()=>{window.__arxSubmitCount++;});',
+  );
   // The shared error-path and edit suites run under Safari unchanged.
   await checkBrowserEdits({ evaluate, until, screenshot });
   await checkBrowserOutcomes({ evaluate, until, screenshot });
@@ -372,6 +378,17 @@ try {
         'typeof uncertainWrites==="undefined"?"<undef>":JSON.stringify(uncertainWrites)',
       pageErrors: "JSON.stringify(window.__arxErrors||null)",
       url: "location.href",
+      submitCount:
+        'window.__arxSubmitCount==null?"<not installed>":window.__arxSubmitCount',
+      mainInert:
+        'document.querySelector("main")?document.querySelector("main").inert:"<no main>"',
+      formValid: 'el("edit-form")?el("edit-form").checkValidity():"<no form>"',
+      invalidControls:
+        'el("edit-form")?JSON.stringify([...el("edit-form").elements].filter((c)=>typeof c.checkValidity==="function"&&!c.checkValidity()).map((c)=>c.id)):"<no form>"',
+      editorError:
+        'document.getElementById("editor-error")?document.getElementById("editor-error").textContent:null',
+      savedReminder:
+        'typeof rows==="undefined"?"<undef>":JSON.stringify(rows.filter((r)=>r.fields.title&&r.fields.title.indexOf("Line one")>=0).map((r)=>({id:r.id,priority:r.fields.priority})))',
     };
     // Sequential probes deliberately reuse the one WebDriver session.
     await Object.entries(probes).reduce(
