@@ -71,7 +71,9 @@ const command = async (method, path, body) => {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const result = await response.json();
-  if (result.value?.error) {
+  // A WebDriver protocol error carries a string error code; a page script may
+  // legitimately return an object with its own error field.
+  if (typeof result.value?.error === "string") {
     throw Error(JSON.stringify(result.value));
   }
   return result.value;
