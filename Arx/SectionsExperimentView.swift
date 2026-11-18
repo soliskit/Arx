@@ -302,35 +302,61 @@ enum SectionsWorkerTransport {
       }
       pthread_sigmask(SIG_SETMASK, &previous, nil)
     }
-    // One deadline bounds the whole exchange: launch, input write, run and output
-    // drain. The worker enforces SIGALRM at entry; this parent never waits longer.
+    // One deadline bounds everything that waits on the child: the input write,
+    // the run and the output drain. Launch itself is a single spawn call that
+    // refuses fast on a missing child. The worker enforces SIGALRM at entry.
     let until = DispatchTime.now().uptimeNanoseconds + 10_000_000_000
     do {
       try process.run()
     } catch {
-      // A missing or unexecutable child refuses without consuming the deadline.
+      // A missing or unexecutable child refuses without any waiting.
       return refused
     }
-    // Drain stdout while the child runs so a full pipe can never stall it into
-    // the deadline; bytes past the 16-KiB bound are counted and discarded.
+    // Both pipe ends must be nonblocking so no child behavior can stall the
+    // parent past the deadline; failing to set that refuses the exchange closed.
     let descriptor = stdout.fileHandleForReading.fileDescriptor
-    let flags = fcntl(descriptor, F_GETFL)
-    _ = fcntl(descriptor, F_SETFL, flags | O_NONBLOCK)
+    let writeDescriptor = stdin.fileHandleForWriting.fileDescriptor
+    func makeNonblocking(_ fd: Int32) -> Bool {
+      let flags = fcntl(fd, F_GETFL)
+      return flags >= 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0
+    }
+    guard makeNonblocking(descriptor), makeNonblocking(writeDescriptor) else {
+      kill(process.processIdentifier, SIGKILL)
+      process.waitUntilExit()
+      return refused
+    }
+    // The input write shares the deadline: a child that never reads cannot stall
+    // the parent, and a fast refusal closing stdin fails the write with EPIPE.
+    var writeComplete = false
+    var written = 0
+    while !writeComplete && DispatchTime.now().uptimeNanoseconds < until {
+      let count = bytes.withUnsafeBytes { buffer -> Int in
+        guard let base = buffer.baseAddress else { return 0 }
+        return write(writeDescriptor, base + written, buffer.count - written)
+      }
+      if count > 0 {
+        written += count
+        writeComplete = written == bytes.count
+      } else if count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) {
+        Thread.sleep(forTimeInterval: 0.025)
+      } else {
+        // EPIPE from a fast refusal, or another write error: the child never got
+        // the full input, so the exchange cannot produce an accepted reply.
+        break
+      }
+    }
+    try? stdin.fileHandleForWriting.close()
+    // Drain stdout while the child runs so a full pipe can never stall it into
+    // the deadline; bytes past the 16-KiB bound are counted and discarded. Each
+    // read rechecks the deadline, so even a continuously writing child cannot
+    // hold the parent past it.
     var output = Data()
     var total = 0
     var sawEOF = false
     var readFailed = false
-    do {
-      try stdin.fileHandleForWriting.write(contentsOf: bytes)
-      try stdin.fileHandleForWriting.close()
-    } catch {
-      // A fast refusal may close stdin first; the write fails and the child
-      // finishes on its own, so the exchange below decides the outcome.
-      try? stdin.fileHandleForWriting.close()
-    }
     var chunk = [UInt8](repeating: 0, count: 8192)
     drain: while DispatchTime.now().uptimeNanoseconds < until {
-      while true {
+      while DispatchTime.now().uptimeNanoseconds < until {
         let count = chunk.withUnsafeMutableBytes { read(descriptor, $0.baseAddress, $0.count) }
         if count > 0 {
           total += count
@@ -347,7 +373,10 @@ enum SectionsWorkerTransport {
           break drain
         }
       }
-      if sawEOF { break }
+      // The exchange completes only when the output stream has closed AND the
+      // child has finished; a reply already at EOF never makes the parent kill
+      // a child that has simply not been reaped yet.
+      if sawEOF && !process.isRunning { break }
       // A descendant holding stdout open after the child exits reaches this same
       // deadline; the parent never blocks on a post-exit read again.
       Thread.sleep(forTimeInterval: 0.025)
@@ -372,7 +401,7 @@ enum SectionsWorkerTransport {
     if process.terminationReason == .exit && process.terminationStatus == 124 {
       return SectionsReply(state: "unknown", reason: "timeout")
     }
-    guard total <= 16384,
+    guard writeComplete, total <= 16384,
       let result = try? JSONDecoder().decode(SectionsReply.self, from: output),
       process.terminationReason == .exit,
       [0, 69, 77].contains(process.terminationStatus)

@@ -23,10 +23,11 @@ struct SectionsWorkerTransportTests {
     "scratchConfirmed": "yes",
   ]
 
-  // Every fixture path a test creates is removed when the test instance drops.
+  // Every fixture path a test creates is removed by that test's own defer; the
+  // explicit reference keeps the box alive until the test body has completed.
   private final class TempArtifacts {
     var paths: [URL] = []
-    deinit {
+    func removeAll() {
       for path in paths {
         try? FileManager.default.removeItem(at: path)
       }
@@ -54,6 +55,7 @@ struct SectionsWorkerTransportTests {
 
   @Test func launchWritesInputAndDecodesReply() async throws {
     let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
     let child = try makeChild(
       """
       input=$(cat)
@@ -71,6 +73,7 @@ struct SectionsWorkerTransportTests {
 
   @Test func acceptedWorkerStatusesReturnReply() async throws {
     let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
     for status in [69, 77] {
       let child = try makeChild(
         """
@@ -86,6 +89,7 @@ struct SectionsWorkerTransportTests {
 
   @Test func unlistedExitStatusIsUnavailable() async throws {
     let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
     let child = try makeChild(
       """
       cat > /dev/null
@@ -99,6 +103,7 @@ struct SectionsWorkerTransportTests {
 
   @Test func workerDeadlineExitIsReportedAsTimeout() async throws {
     let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
     let child = try makeChild(
       """
       cat > /dev/null
@@ -111,6 +116,7 @@ struct SectionsWorkerTransportTests {
 
   @Test func signalDeathIsUnavailableNotTimeout() async throws {
     let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
     let child = try makeChild(
       """
       cat > /dev/null
@@ -123,6 +129,7 @@ struct SectionsWorkerTransportTests {
 
   @Test func malformedOutputIsUnavailable() async throws {
     let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
     let child = try makeChild(
       """
       cat > /dev/null
@@ -136,6 +143,7 @@ struct SectionsWorkerTransportTests {
 
   @Test func oversizedOutputIsUnavailableWithoutReachingTheDeadline() async throws {
     let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
     let child = try makeChild(
       """
       cat > /dev/null
@@ -154,6 +162,7 @@ struct SectionsWorkerTransportTests {
 
   @Test func largeValidReplyDecodesAcrossPipeCapacity() async throws {
     let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
     let child = try makeChild(
       """
       cat > /dev/null
@@ -176,6 +185,7 @@ struct SectionsWorkerTransportTests {
 
   @Test func childClosingStdinEarlyIsUnavailable() async throws {
     let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
     let child = try makeChild(
       """
       exit 0
@@ -188,13 +198,33 @@ struct SectionsWorkerTransportTests {
 
   @Test func descendantHoldingStdoutEndsAtTheDeadline() async throws {
     let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
     let child = try makeChild(
       """
-      ( sleep 15 ) &
+      ( exec sleep 15 ) &
+      printf '%s' "$!" > "$(dirname "$0")/descendant.pid"
       cat > /dev/null
       printf '%s' '{"state":"labels","reason":"local_selection_only","lists":[]}'
       exit 0
       """, into: artifacts)
+    let pidFile = child.deletingLastPathComponent().appendingPathComponent("descendant.pid")
+    defer {
+      // The fixture owns this descendant: end exactly the recorded PID and
+      // confirm it is gone before the test finishes. No other process matches.
+      guard let text = try? String(contentsOf: pidFile, encoding: .utf8),
+        let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines))
+      else { return }
+      kill(pid, SIGKILL)
+      var gone = false
+      for _ in 0..<80 {
+        if kill(pid, 0) != 0, errno == ESRCH {
+          gone = true
+          break
+        }
+        Thread.sleep(forTimeInterval: 0.025)
+      }
+      #expect(gone)
+    }
     let started = Date()
     let reply = await call(child)
     let elapsed = Date().timeIntervalSince(started)
@@ -207,6 +237,7 @@ struct SectionsWorkerTransportTests {
 
   @Test func parentDeadlineStopsRunawayChild() async throws {
     let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
     let child = try makeChild(
       """
       exec sleep 60
@@ -221,6 +252,7 @@ struct SectionsWorkerTransportTests {
 
   @Test func refusalDoesNotRetryTheChild() async throws {
     let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
     let countFile = FileManager.default.temporaryDirectory
       .appendingPathComponent("sections-launches-" + UUID().uuidString)
     artifacts.paths.append(countFile)

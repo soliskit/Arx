@@ -25,13 +25,16 @@ dependency, account, tunnel or permission setting is changed.
   sanitized result. Hosted screenshots use only these modes.
 
 Each child has a process-wide 10-second alarm, and the parent kills its child at
-its own 10-second deadline. That one parent deadline bounds the whole exchange:
-launch, input write, run and output drain. The parent drains output while the
-child runs, so a full pipe can never stall the writer into the deadline; bytes
-past the output bound are counted and discarded. The exchange completes only at
-EOF, so a descendant holding the child's output pipe open ends the wait at the
-same deadline instead of blocking the parent. The membership deadline starts on
-Run, not during interactive setup. There are no worker retries. Input is limited to 4096 bytes;
+its own 10-second deadline. That one parent deadline bounds everything that
+waits on the child: the nonblocking input write, the run and the output drain;
+launch itself is a single spawn call that refuses fast on a missing child. The
+parent drains output while the child runs, so a full pipe can never stall the
+writer into the deadline; bytes past the output bound are counted and
+discarded. The exchange completes only when the output stream has closed and
+the child has finished, so a descendant holding the child's output pipe open
+ends the wait at the same deadline instead of blocking the parent. The
+membership deadline starts on Run, not during interactive setup. There are no
+worker retries. Input is limited to 4096 bytes;
 section-read output to 2048 bytes. Local account/list labels have a separate
 16384-byte/100-list bound and are never included in the copyable report. Timeout,
 crash, permission refusal, mismatch, missing metadata or unknown ends the
