@@ -70,10 +70,22 @@ const command = async (method, path, body) => {
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const result = await response.json();
-  // A WebDriver protocol error carries a string error code; a page script may
-  // legitimately return an object with its own error field.
-  if (typeof result.value?.error === "string") {
+  const text = await response.text();
+  let result;
+  try {
+    result = JSON.parse(text);
+  } catch {
+    throw Error(`WebDriver HTTP ${response.status}: ${text.slice(0, 200)}`);
+  }
+  // The protocol boundary is the HTTP status: errors are non-2xx with a
+  // string error code, while a 200 value is script data even when the page
+  // returns an object with its own error field. Keep the spec's error shape
+  // as a fallback for a driver that reports a protocol error with a 200.
+  if (
+    !response.ok ||
+    (typeof result.value?.error === "string" &&
+      typeof result.value?.stacktrace === "string")
+  ) {
     throw Error(JSON.stringify(result.value));
   }
   return result.value;
