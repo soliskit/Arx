@@ -14,9 +14,10 @@
   const formatTime = (d) =>
     d.hour === undefined
       ? ""
-      : [String(d.hour).padStart(2, "0"), String(d.minute).padStart(2, "0")].join(
-          ":",
-        );
+      : [
+          String(d.hour).padStart(2, "0"),
+          String(d.minute).padStart(2, "0"),
+        ].join(":");
   function validSession(state) {
     return (
       typeof state?.csrf === "string" &&
@@ -50,7 +51,8 @@
         Number(parts[2]) < 24 &&
         Number(parts[3]) < 60 &&
         Number(parts[4]) < 60 &&
-        (parts[5] === "Z" || (Number(parts[6]) < 24 && Number(parts[7]) < 60)) &&
+        (parts[5] === "Z" ||
+          (Number(parts[6]) < 24 && Number(parts[7]) < 60)) &&
         new Date(parts[1]).toISOString().startsWith(parts[1])
       );
     };
