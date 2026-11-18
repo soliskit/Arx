@@ -52,35 +52,43 @@ import SwiftUI
 /// accessibility-element flags are never touched. The probe is a plain
 /// NSView in background layout.
 ///
-/// The detail column's probe additionally carries a WINDOW ROOT experiment,
-/// active only in the DEBUG fixture dump configuration (the same flags that
-/// gate its records): in ordinary or release launches it installs nothing.
-/// From the validated split anchor - the column wrapper's own NSSplitView,
+/// The detail column's probe additionally carries the WINDOW ROOT work:
+/// from the validated split anchor - the column wrapper's own NSSplitView,
 /// proven an arranged container on the same visit - it walks strictly above
 /// the anchor toward the window's content view, collecting every ancestor
 /// that is already exposed (isAccessibilityElement() == true) and already
 /// carries the group role. Only when the walk actually reaches the content
 /// view on a complete, non-truncated path holding exactly one such ancestor
-/// does it install an identifier - never a label or role change - and only
-/// while that identifier is vacant. Whether even an identifier changes
-/// anything user-facing or audit-visible is observed by the harness and the
-/// strict audit, not assumed. Zero or multiple eligible ancestors, a
-/// missing or invalid split anchor, a truncated or broken path, a
-/// non-vacant identifier, a failed write-time or membership revalidation,
-/// or an install whose readback disagrees each end the experiment for that
-/// visit - reconciling any prior install away where one exists - and are
-/// reported as distinct bounded outcomes. A visit that loses its validated
-/// split anchor ends the root episode rather than leaving a stale
-/// identifier behind, and an episode whose install was never verified
-/// never retries it.
-/// The root experiment owns its own separate bookkeeping keyed on the full
+/// is that view selected; in the current run's accessibility
+/// representation it is the group the strict audit reported as "Element
+/// has no description", bound by the finding's own element carrying the
+/// installed identifier, a unique identifier query, and a readback-
+/// verified install (the selected ancestor is not thereby proven to be
+/// the window's contentView object, and a frame match with earlier runs'
+/// findings is not identity proof). Zero or multiple eligible ancestors, a missing or
+/// invalid split anchor, a truncated or broken path, a non-vacant value,
+/// or a failed write-time or membership revalidation each fail closed -
+/// reconciling any prior install away where one exists - and are reported
+/// as distinct bounded outcomes. A visit that loses its validated split
+/// anchor ends the root episode rather than leaving a stale install
+/// behind, and an episode whose install was never verified never retries
+/// it.
+///
+/// Two changes are made on the selected view, each only while vacant, and
+/// BOTH run only in the DEBUG fixture dump configuration as CI hypothesis
+/// tests - ordinary and release launches install nothing:
+///   - Description hypothesis: the window's own title as the label, to
+///     test whether a description clears the audit's undescribed-group
+///     finding. Promoting a description to ordinary or release launches
+///     would be a separately reviewed production change with its own
+///     user-facing assessment; this candidate makes no such claim.
+///   - Identification experiment: a stable identifier, never a role
+///     change, so the finding can be attributed by record.
+/// The root episode owns its own separate bookkeeping keyed on the full
 /// context (root, content view, window, split anchor) with the same
 /// exact-original restore rules, and the column bookkeeping above is
-/// untouched by it. The audit's remaining undescribed-group finding is
-/// bound to this element only when the finding's own element carries the
-/// installed identifier; a finding that persists without it is
-/// inconclusive, and a finding that disappears proves nothing about
-/// identity. This is an identification experiment, not a repair.
+/// untouched by it. An episode ends on a real context change, path
+/// invalidation, or teardown; only then is a new root examined.
 struct ColumnAccessibilityProbe: NSViewRepresentable {
   enum Column {
     case sidebar
@@ -128,6 +136,7 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
     weak var rootContentView: NSView?
     weak var rootWindow: NSWindow?
     weak var rootSplit: NSSplitView?
+    var rootLabelChange: (original: String?, installed: String)?
     var rootIdentifierChange: (original: String, installed: String)?
     var rootRecordOutcomes = Set<String>()
     var generation: UInt = 0
@@ -186,16 +195,22 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
     coordinator.identifierChange = nil
   }
 
-  /// Restores the root experiment's recorded identifier change (while the
-  /// current value still equals the installed one), then ALWAYS clears the
-  /// root bookkeeping, including when the weak target is already gone.
+  /// Restores the root experiment's recorded label and identifier changes
+  /// (while each current value still equals the installed one), then
+  /// ALWAYS clears the root bookkeeping, including when the weak target is
+  /// already gone.
   private static func restoreRoot(_ coordinator: Coordinator) {
-    if let root = coordinator.observedRoot,
-      let change = coordinator.rootIdentifierChange,
-      root.accessibilityIdentifier() == change.installed
-    {
-      root.setAccessibilityIdentifier(change.original)
+    if let root = coordinator.observedRoot {
+      if let change = coordinator.rootLabelChange, root.accessibilityLabel() == change.installed {
+        root.setAccessibilityLabel(change.original)
+      }
+      if let change = coordinator.rootIdentifierChange,
+        root.accessibilityIdentifier() == change.installed
+      {
+        root.setAccessibilityIdentifier(change.original)
+      }
     }
+    coordinator.rootLabelChange = nil
     coordinator.observedRoot = nil
     coordinator.rootContentView = nil
     coordinator.rootWindow = nil
@@ -332,8 +347,9 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
     }
   }
 
-  /// The window root experiment, gated to the DEBUG fixture dump
-  /// configuration: outside it the experiment installs nothing. From the
+  /// The window root work, gated to the DEBUG fixture dump configuration:
+  /// outside it nothing is installed. A description hypothesis (the
+  /// window's own title) plus the identification-only experiment. From the
   /// validated split anchor (the column wrapper's own NSSplitView, proven
   /// an arranged container on this same visit), walk strictly above the
   /// anchor toward the window's content view, collecting every ancestor
@@ -341,8 +357,8 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
   /// complete, non-truncated path that actually reaches the content view
   /// with exactly one eligible ancestor qualifies; every other shape fails
   /// closed (any prior install reconciled away) with a distinct bounded
-  /// outcome. The experiment NEVER installs a label and never touches
-  /// roles, exposure, children, frames or visibility.
+  /// outcome. The work NEVER assigns a role and never touches exposure,
+  /// children, frames or visibility.
   private func updateRootTarget(
     anchoredAt split: NSSplitView, window: NSWindow, coordinator: Coordinator
   ) {
@@ -411,6 +427,11 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
       {
         coordinator.rootIdentifierChange = nil
       }
+      if let change = coordinator.rootLabelChange,
+        target.accessibilityLabel() != change.installed
+      {
+        coordinator.rootLabelChange = nil
+      }
       return
     }
     // A different root or context, or the first inspection: end the old
@@ -430,6 +451,32 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
     coordinator.rootContentView = contentView
     coordinator.rootWindow = window
     coordinator.rootSplit = split
+    // All root writes sit behind the entry gate above: this candidate
+    // TESTS the repair hypothesis in the DEBUG fixture dump configuration
+    // only. Promoting a description to ordinary or release launches would
+    // be a separately reviewed production change, not part of this
+    // candidate. Description hypothesis: the window's own title describes
+    // its content group. Installed only while the label is vacant; a
+    // foreign label is never overwritten.
+    let title = window.title
+    let existingLabel = target.accessibilityLabel()
+    if title.isEmpty {
+      Self.emitRootRecord(coordinator: coordinator, outcome: "no-window-title", eligible: 1)
+    } else if existingLabel != nil && existingLabel != "" {
+      Self.emitRootRecord(coordinator: coordinator, outcome: "foreign-label", eligible: 1)
+    } else {
+      target.setAccessibilityLabel(title)
+      if target.accessibilityLabel() == title {
+        coordinator.rootLabelChange = (original: existingLabel, installed: title)
+        Self.emitRootRecord(coordinator: coordinator, outcome: "label-installed", eligible: 1)
+      } else {
+        // Unexpected readback: leave the current value exactly as found
+        // (never overwrite it), keep no owned label record, and never
+        // retry within this episode.
+        Self.emitRootRecord(coordinator: coordinator, outcome: "label-unverified", eligible: 1)
+      }
+    }
+    // Identification experiment.
     let existingIdentifier = target.accessibilityIdentifier()
     if !existingIdentifier.isEmpty {
       Self.emitRootRecord(coordinator: coordinator, outcome: "foreign-id", eligible: 1)
@@ -456,8 +503,9 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
   }
 
   /// True only in the DEBUG fixture dump configuration (the two flags the
-  /// fixture UI test launches pass). Gates the window root experiment
-  /// itself - installs and records - never the production column fix.
+  /// fixture UI test launches pass). Gates the window root work itself -
+  /// description hypothesis, identification experiment, and records -
+  /// never the production column fix.
   private static var fixtureDumpConfiguration: Bool {
     #if DEBUG
       let arguments = ProcessInfo.processInfo.arguments
