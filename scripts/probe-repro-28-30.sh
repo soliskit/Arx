@@ -17,17 +17,40 @@ SECRET=""
 PAIR_HEADERS=""
 PAIR_BODY=""
 cleanup() {
-  if [[ -n "${PID}" ]] && kill -0 "${PID}" 2>/dev/null; then
-    kill "${PID}" 2>/dev/null || true
-    wait "${PID}" 2>/dev/null || true
+  if [[ -n "${TOTAL_WATCHDOG:-}" ]]; then
+    kill "${TOTAL_WATCHDOG}" 2>/dev/null || true
+    bounded_reap "${TOTAL_WATCHDOG}" 5
+  fi
+  # The app runs in its own session (see launch), so the group kill owns its
+  # descendants too. The kill targets the recorded group unconditionally: a
+  # leader that exited first must not skip surviving members, and relaunch
+  # never reuses this variable before this point. A recycled pgid belonging to
+  # someone else is a stated residual risk, bounded by the short lifetime.
+  if [[ -n "${PID}" ]]; then
+    kill -TERM -- -"${PID}" 2>/dev/null || true
+    bounded_reap_group "${PID}" 10
+    kill -KILL -- -"${PID}" 2>/dev/null || true
   fi
   [[ -n "${PAIR_HEADERS}" ]] && rm -f "${PAIR_HEADERS}"
   [[ -n "${PAIR_BODY}" ]] && rm -f "${PAIR_BODY}"
   # Clear only the fixture-owned pairing secret, and only while the pasteboard
-  # still holds exactly it; never erase unrelated clipboard contents.
-  if [[ -n "${SECRET}" ]] && [[ "$(pbpaste 2>/dev/null || true)" == "${SECRET}" ]]; then
-    printf '' | pbcopy
+  # still holds exactly it; never erase unrelated clipboard contents. A failed
+  # or wedged pasteboard read/write is reported, never silent.
+  if [[ -n "${SECRET}" ]]; then
+    local_paste=""
+    local_paste=$(bounded "${PASTE_LIMIT}" "${OUTCOME_FILE}" pbpaste 2>/dev/null)
+    local_paste_outcome=$(cat "${OUTCOME_FILE}" 2>/dev/null || true)
+    if [[ "${local_paste_outcome}" != "ok" ]]; then
+      echo "CLEANUP WARNING: pasteboard read ${local_paste_outcome:-no-outcome}; the fixture pairing secret may remain on the pasteboard" >>"${OUT}"
+    elif [[ "${local_paste}" == "${SECRET}" ]]; then
+      printf '' | bounded "${PASTE_LIMIT}" "${OUTCOME_FILE}" pbcopy
+      local_clear_outcome=$(cat "${OUTCOME_FILE}" 2>/dev/null || true)
+      if [[ "${local_clear_outcome}" != "ok" ]]; then
+        echo "CLEANUP WARNING: pasteboard clear ${local_clear_outcome:-no-outcome}; the fixture pairing secret may remain on the pasteboard" >>"${OUT}"
+      fi
+    fi
   fi
+  rm -f "${OUTCOME_FILE}"
 }
 trap cleanup EXIT
 native() {
@@ -140,61 +163,295 @@ on run argv
 end run
 APPLESCRIPT
 }
-launch() {
-  if [[ -n "${PID}" ]] && kill -0 "${PID}" 2>/dev/null; then
-    kill "${PID}" 2>/dev/null || true
-    wait "${PID}" 2>/dev/null || true
-  fi
-  "${APP}/Contents/MacOS/Arx" --bridge-fixtures "$@" >fixture-probe.log 2>&1 &
-  PID=$!
-  local bounds _
-  for _ in $(seq 1 30); do
-    bounds=$(osascript -e 'tell application "System Events" to tell process "Arx" to get (position of window 1) & (size of window 1)' 2>/dev/null || true)
-    [[ -n "${bounds}" ]] && return 0
+export -f native
+# --- bounded execution helpers --------------------------------------------
+# bounded LIMIT OUTCOME_FILE COMMAND [ARGS...]
+# Runs COMMAND through a python3 supervisor in its own process group.
+#  - The leader runs up to LIMIT seconds; on expiry the whole group (children
+#    and grandchildren) is SIGKILLed and reaped.
+#  - After the leader exits, the group gets a short grace to finish; lingering
+#    descendants are then killed, so a pipe-holding grandchild cannot keep an
+#    outer command substitution open.
+#  - Child stdout/stderr pass through pipes the supervisor owns and relays, so
+#    the supervisor's exit always closes any outer capture.
+#  - On SIGTERM/SIGINT/SIGHUP (runner cancellation) the supervisor kills the
+#    group before dying.
+# The outcome is out-of-band: the supervisor writes exactly one token to
+# OUTCOME_FILE - "ok", "failed:<exit>" (the leader's own status, including a
+# leader that itself exits 124), "failed:signaled", or "timeout" - and exits 0
+# unless the supervisor itself failed, so no exit code is ambiguous.
+bounded() {
+  local limit="$1" outcome_file="$2"; shift 2
+  : > "${outcome_file}"
+  # Never exits nonzero: a supervisor-internal failure (including a missing
+  # python3) becomes a typed "supervisor-error" outcome, so callers read one
+  # channel and no call site needs a condition around this function.
+  python3 - "${limit}" "${outcome_file}" bash -c '"$@"' bounded-invoke "$@" <<'PYBOUNDED' || printf 'supervisor-error' > "${outcome_file}"
+import os, signal, subprocess, sys, threading, time
+
+limit = float(sys.argv[1])
+outcome_path = sys.argv[2]
+cmd = sys.argv[3:]
+grace = 2.0
+
+# Block cancellation signals before the child exists so a runner cancel
+# landing between Popen and handler registration is held pending, then
+# delivered to the installed handler. The child's original mask is restored
+# before exec so supervised commands see ordinary signal semantics. A cancel
+# landing before the supervisor itself starts (shell -> python exec) remains
+# outside this protection and can orphan the group; that interval is stated,
+# not claimed covered.
+watched = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+saved_mask = signal.pthread_sigmask(signal.SIG_BLOCK, watched)
+
+def restore_child_mask():
+    signal.pthread_sigmask(signal.SIG_SETMASK, saved_mask)
+
+proc = subprocess.Popen(cmd, start_new_session=True,
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        preexec_fn=restore_child_mask)
+
+def relay(stream, target):
+    try:
+        while True:
+            chunk = stream.read1(65536)
+            if not chunk:
+                return
+            target.write(chunk)
+            target.flush()
+    except (ValueError, OSError):
+        return
+
+out_thread = threading.Thread(target=relay, args=(proc.stdout, sys.stdout.buffer), daemon=True)
+err_thread = threading.Thread(target=relay, args=(proc.stderr, sys.stderr.buffer), daemon=True)
+out_thread.start()
+err_thread.start()
+
+signaled = False
+def kill_group():
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+def handler(signum, frame):
+    global signaled
+    signaled = True
+for sig in watched:
+    signal.signal(sig, handler)
+signal.pthread_sigmask(signal.SIG_UNBLOCK, watched)
+
+deadline = time.monotonic() + limit
+outcome = None
+while True:
+    rc = proc.poll()
+    if rc is not None:
+        # Flush output up to the grace window, then unconditionally reconcile
+        # the owned group: a descendant that closed its descriptors is just as
+        # dead to us as one still holding them.
+        gdeadline = time.monotonic() + grace
+        while time.monotonic() < gdeadline and (out_thread.is_alive() or err_thread.is_alive()):
+            time.sleep(0.05)
+        kill_group()
+        proc.wait()
+        if signaled:
+            outcome = "failed:signaled"
+        else:
+            outcome = "ok" if rc == 0 else "failed:%d" % rc
+        break
+    if signaled:
+        kill_group()
+        proc.wait()
+        outcome = "failed:signaled"
+        break
+    if time.monotonic() > deadline:
+        kill_group()
+        proc.wait()
+        outcome = "timeout"
+        break
+    time.sleep(0.05)
+
+out_thread.join(timeout=5)
+err_thread.join(timeout=5)
+with open(outcome_path, "w") as handle:
+    handle.write(outcome)
+if signaled:
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    os.kill(os.getpid(), signal.SIGTERM)
+sys.exit(0)
+PYBOUNDED
+  return 0
+}
+# probe_call LIMIT STAGE COMMAND [ARGS...]
+# A probe call that must succeed. A timeout, failure, or supervisor error is a
+# typed harness failure recorded by fixed stage token (never raw argv, so no
+# secret can reach the evidence file) and aborts the script: polling a wedged
+# AX session again cannot recover it.
+probe_call() {
+  local limit="$1" stage="$2"; shift 2
+  local outcome
+  bounded "${limit}" "${OUTCOME_FILE}" "$@"
+  outcome=$(cat "${OUTCOME_FILE}" 2>/dev/null || true)
+  case "${outcome}" in
+    ok) ;;
+    timeout)
+      echo "HARNESS FAILURE: probe stage ${stage} timed out after ${limit}s" >>"${OUT}"
+      exit 1 ;;
+    failed:*|supervisor-error)
+      echo "HARNESS FAILURE: probe stage ${stage} ${outcome}" >>"${OUT}"
+      exit 1 ;;
+    *)
+      echo "HARNESS FAILURE: probe stage ${stage} produced no typed outcome" >>"${OUT}"
+      exit 1 ;;
+  esac
+}
+# Bounded TERM-then-KILL for a direct child pid (the total watchdog); polls
+# up to LIMIT seconds before the KILL and reaps with wait.
+bounded_reap() {
+  local pid="$1" limit="$2" _
+  for _ in $(seq 1 "${limit}"); do
+    if ! kill -0 "${pid}" 2>/dev/null; then
+      wait "${pid}" 2>/dev/null || true
+      return 0
+    fi
     sleep 1
   done
-  echo "No app window" >&2
+  kill -KILL "${pid}" 2>/dev/null || true
+  wait "${pid}" 2>/dev/null || true
+  return 0
+}
+# Bounded wait for a whole process GROUP (the app, which is not our child and
+# is reaped by init, never by us). Existence is checked on the group, not the
+# leader, so a leader that exits first cannot hide surviving members.
+bounded_reap_group() {
+  local pgid="$1" limit="$2" _
+  for _ in $(seq 1 "${limit}"); do
+    kill -0 -- -"${pgid}" 2>/dev/null || return 0
+    sleep 1
+  done
+  return 0
+}
+OUTCOME_FILE="${TMPDIR:-/tmp}/arx-probe-outcome.$$"
+: > "${OUTCOME_FILE}"
+# Per-call bounds; environment overrides exist only so the harness's own
+# integration tests can run with tiny limits. CI uses the defaults.
+LABELS_LIMIT="${ARX_PROBE_LIMIT_LABELS:-180}"
+CLIENTS_LIMIT="${ARX_PROBE_LIMIT_CLIENTS:-120}"
+PRESSID_LIMIT="${ARX_PROBE_LIMIT_PRESSID:-120}"
+CALL_LIMIT="${ARX_PROBE_LIMIT_CALL:-60}"
+PASTE_LIMIT="${ARX_PROBE_LIMIT_PASTE:-10}"
+WINDOW_LIMIT="${ARX_PROBE_LIMIT_WINDOW:-15}"
+# Total backstop. TERM is trapped so the bounded cleanup still runs; bash
+# defers a TERM trap while blocked in a command substitution. Conservative
+# worst case, not a hard wallclock guarantee (OS scheduling and
+# uninterruptible sleeps are outside it): TOTAL_LIMIT (900s) + the longest
+# per-call bound (180s nominal + up to 2s group grace + up to 10s relay
+# joins) + bounded cleanup (~60s: watchdog reap 5s, app group TERM/poll 10s,
+# and two pasteboard calls at 10s nominal + 12s overhead each) is about
+# 1150s. Cleanup is killed-watchdog-first, so it rests on its own finite
+# waits, not on the KILL fallback. The KILL after a grace period is the last
+# resort if even that deferral fails; it skips cleanup. The watchdog is a
+# single python3 process with no children, so killing its pid fully owns it.
+TOTAL_LIMIT="${ARX_PROBE_LIMIT_TOTAL:-900}"
+TOTAL_GRACE=200
+python3 - "${TOTAL_LIMIT}" "${TOTAL_GRACE}" "$$" "${OUT}" <<'PYWATCHDOG' &
+import os, signal, sys, time
+limit, grace, target, out_path = float(sys.argv[1]), float(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
+time.sleep(limit)
+try:
+    with open(out_path, "a") as handle:
+        handle.write("HARNESS FAILURE: total probe time exceeded %ds" % limit + chr(10))
+except OSError:
+    pass
+try:
+    os.kill(target, signal.SIGTERM)
+except (ProcessLookupError, PermissionError):
+    sys.exit(0)
+time.sleep(grace)
+try:
+    os.kill(target, signal.SIGKILL)
+except (ProcessLookupError, PermissionError):
+    pass
+PYWATCHDOG
+TOTAL_WATCHDOG=$!
+trap 'exit 1' TERM INT
+
+launch() {
+  if [[ -n "${PID}" ]]; then
+    kill -TERM -- -"${PID}" 2>/dev/null || true
+    bounded_reap_group "${PID}" 10
+    kill -KILL -- -"${PID}" 2>/dev/null || true
+  fi
+  # Spawn the app in its own session so cleanup can kill its whole group.
+  PID=$(python3 - "${APP}/Contents/MacOS/Arx" --bridge-fixtures "$@" <<'PYSPAWN'
+import subprocess, sys
+log = open("fixture-probe.log", "ab")
+proc = subprocess.Popen(sys.argv[1:], start_new_session=True, stdout=log, stderr=subprocess.STDOUT)
+print(proc.pid)
+PYSPAWN
+)
+  local bounds _ window_outcome
+  for _ in $(seq 1 30); do
+    bounds=$(bounded "${WINDOW_LIMIT}" "${OUTCOME_FILE}" osascript -e 'tell application "System Events" to tell process "Arx" to get (position of window 1) & (size of window 1)' 2>/dev/null)
+    window_outcome=$(cat "${OUTCOME_FILE}" 2>/dev/null || true)
+    case "${window_outcome}" in
+      ok) [[ -n "${bounds}" ]] && return 0 ;;
+      failed:*) ;; # window not up yet; keep polling
+      *)
+        echo "HARNESS FAILURE: probe stage window-bounds ${window_outcome:-no-outcome}" >>"${OUT}"
+        exit 1 ;;
+    esac
+    sleep 1
+  done
+  echo "HARNESS FAILURE: probe stage window-bounds no app window after 30 attempts" >>"${OUT}"
   exit 1
 }
 STATUS_FOUND=0
 wait_status() {
-  local pattern="$1" _ snapshot
+  local pattern="$1" _ snapshot status_outcome
   STATUS_FOUND=0
   for _ in $(seq 1 60); do
-    snapshot=$(native status 2>&1)
-    if [[ "${snapshot}" == *"${pattern}"* ]]; then
-      STATUS_FOUND=1
-      return 0
-    fi
+    snapshot=$(bounded "${CALL_LIMIT}" "${OUTCOME_FILE}" native status 2>&1)
+    status_outcome=$(cat "${OUTCOME_FILE}" 2>/dev/null || true)
+    case "${status_outcome}" in
+      ok)
+        if [[ "${snapshot}" == *"${pattern}"* ]]; then
+          STATUS_FOUND=1
+          return 0
+        fi ;;
+      failed:*) ;; # transient query failure while the bridge comes up; keep polling
+      *)
+        echo "HARNESS FAILURE: probe stage wait-status ${status_outcome:-no-outcome}" >>"${OUT}"
+        exit 1 ;;
+    esac
     sleep 1
   done
   return 0
 }
 echo "== #28: exposed label and help attributes of the list toggles ==" >>"${OUT}"
 launch
-native labels >>"${OUT}" 2>&1
+probe_call "${LABELS_LIMIT}" ax-labels native labels >>"${OUT}" 2>&1
 echo "== #30(c): overlong pairing label while the service runs ==" >>"${OUT}"
-native setfield 1 1 "https://bridge.example.test"
-native pressid bridge-start
+probe_call "${CALL_LIMIT}" set-bridge-url native setfield 1 1 "https://bridge.example.test"
+probe_call "${PRESSID_LIMIT}" press-bridge-start native pressid bridge-start
 wait_status "Listening on 127.0.0.1:8765"
 if [[ "${STATUS_FOUND}" -ne 1 ]]; then
   echo "HARNESS FAILURE: bridge did not start; status lines follow" >>"${OUT}"
-  native status >>"${OUT}" 2>&1
+  probe_call "${CALL_LIMIT}" bridge-status-after-refusal native status >>"${OUT}" 2>&1
   exit 1
 fi
 printf -v LONG_LABEL '%081d' 0
-native setfield 2 1 "${LONG_LABEL}"
-native press 2 1
+probe_call "${CALL_LIMIT}" set-long-label native setfield 2 1 "${LONG_LABEL}"
+probe_call "${CALL_LIMIT}" pair-long-label native press 2 1
 sleep 1
 {
   echo "status after an 81-character label and Pair:"
-  native status
+  probe_call "${CALL_LIMIT}" status-after-long-label native status
 } >>"${OUT}" 2>&1
 echo "== #30(a): client status before and after manual refresh ==" >>"${OUT}"
-native setfield 2 1 "Browser client"
-native press 2 1
+probe_call "${CALL_LIMIT}" set-client-name native setfield 2 1 "Browser client"
+probe_call "${CALL_LIMIT}" pair-client native press 2 1
 sleep 1
-BASELINE_CLIENTS=$(native clients 2>&1)
+BASELINE_CLIENTS=$(probe_call "${CLIENTS_LIMIT}" clients-baseline native clients 2>&1)
 {
   echo "client rows BEFORE pair exchange (baseline):"
   echo "${BASELINE_CLIENTS}"
@@ -203,8 +460,8 @@ if [[ "${BASELINE_CLIENTS}" != *"Browser client"* || "${BASELINE_CLIENTS}" != *"
   echo "HARNESS FAILURE: baseline client row for the new client is missing or not awaiting pairing" >>"${OUT}"
   exit 1
 fi
-native press 2 2
-SECRET=$(pbpaste)
+probe_call "${CALL_LIMIT}" copy-secret native press 2 2
+SECRET=$(probe_call "${PASTE_LIMIT}" read-secret pbpaste)
 if [[ -z "${SECRET}" ]]; then
   echo "HARNESS FAILURE: no pairing secret on the pasteboard" >>"${OUT}"
   exit 1
@@ -248,11 +505,11 @@ fi
 {
   echo "pair exchange admitted: HTTP 200, typed session response (non-empty csrf string and rights object), non-empty session cookie; values withheld"
   echo "client rows AFTER pair exchange, BEFORE manual refresh:"
-  native clients
+  probe_call "${CLIENTS_LIMIT}" clients-after-pair native clients
 } >>"${OUT}" 2>&1
-native press 3 1
+probe_call "${CALL_LIMIT}" press-refresh native press 3 1
 sleep 1
-POST_REFRESH=$(native clients 2>&1)
+POST_REFRESH=$(probe_call "${CLIENTS_LIMIT}" clients-after-refresh native clients 2>&1)
 {
   echo "client rows AFTER manual refresh:"
   echo "${POST_REFRESH}"
@@ -265,7 +522,15 @@ echo "== #30(b): status message across a simulated store change (status-overwrit
 launch --fixture-stopping --fixture-store-change
 BEFORE_SNAP=""
 for _ in $(seq 1 30); do
-  SNAP=$(native status 2>&1)
+  SNAP=$(bounded "${CALL_LIMIT}" "${OUTCOME_FILE}" native status 2>&1)
+  snap_outcome=$(cat "${OUTCOME_FILE}" 2>/dev/null || true)
+  case "${snap_outcome}" in
+    ok) ;;
+    failed:*) SNAP="" ;; # transient query failure; keep polling
+    *)
+      echo "HARNESS FAILURE: probe stage stopping-baseline ${snap_outcome:-no-outcome}" >>"${OUT}"
+      exit 1 ;;
+  esac
   if [[ "${SNAP}" == *"Access revoked. Waiting for the local listener to stop."* ]]; then
     BEFORE_SNAP="${SNAP}"
     break
@@ -286,6 +551,6 @@ fi
 sleep 12
 {
   echo "status AFTER the simulated store change:"
-  native status
+  probe_call "${CALL_LIMIT}" status-after-store-change native status
 } >>"${OUT}" 2>&1
 echo "Probes complete; evidence recorded in ${OUT}."

@@ -285,6 +285,14 @@ jobs:
 
   repro-probes:
     runs-on: xcode-27
+    # Outer backstop for the whole job, not a cleanup guarantee: the observed
+    # ~6-minute prelude (checkout, Xcode selection, dependency resolution,
+    # build - observed, not bounded) plus the probe script's conservative
+    # worst case (~1150s: TOTAL_LIMIT 900s + longest per-call 192s with
+    # supervisor grace/joins + bounded cleanup ~60s) fits with margin. The
+    # script's own per-call and total bounds are the primary mechanism; this
+    # also covers the display setup prelude the script cannot bound itself.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode 27.2
