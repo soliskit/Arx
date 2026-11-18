@@ -65,6 +65,7 @@ final class ArxUITests: XCTestCase {
     // observation found, and one combined assertion reports everything at
     // the end. No defer: XCTest failure unwinding can skip deferred work.
     var issues = columnContainerFindings(application)
+    windowContentObservation(application)
     issues.append(contentsOf: controlInventoryFindings(application))
     // Collect every issue with its full description and element details
     // before failing; the thrown error names only the issue type
@@ -74,7 +75,7 @@ final class ArxUITests: XCTestCase {
     // pngRepresentation forces the capture now, before the audit runs
     // (XCUIScreenshot's documented PNG data property on macOS).
     let auditPNG = application.screenshot().pngRepresentation
-    let installedIdentifiers: Set<String> = ["column-sidebar", "column-detail"]
+    let installedIdentifiers: Set<String> = ["column-sidebar", "column-detail", "window-content"]
     try application.performAccessibilityAudit { issue in
       var line = String(describing: issue)
       // Fixed token only: whether THIS issue's element carries one of the
@@ -283,6 +284,32 @@ final class ArxUITests: XCTestCase {
     return findings
   }
 
+  /// Window-root binding observation. Report only: prints one fixed-token
+  /// line for the probe's "window-content" identifier across ALL element
+  /// types and NEVER appends a finding - every outcome (absent, unique,
+  /// not-unique) is a legitimate experiment result, and the binding itself is
+  /// decided only by the audit issue's own matches-installed-id token.
+  /// Output is a bounded count, a closed role token and booleans; no
+  /// strings, frames or addresses leave the test.
+  private func windowContentObservation(_ application: XCUIApplication) {
+    let matches = application.descendants(matching: .any).matching(
+      NSPredicate(format: "identifier == %@", "window-content"))
+    let count = matches.count
+    var labelPresent = false
+    var roleToken = count > 1 ? "not-unique" : "absent"
+    if count == 1 {
+      let element = matches.firstMatch
+      labelPresent = !element.label.isEmpty
+      switch element.elementType {
+      case .group: roleToken = "group"
+      case .staticText: roleToken = "staticText"
+      default: roleToken = "other"
+      }
+    }
+    print(
+      "window content observation: count=\(count) role=\(roleToken) labelPresent=\(labelPresent)")
+  }
+
   private func columnContainerFindings(_ application: XCUIApplication) -> [String] {
     let expected: [(token: String, identifier: String, label: String, child: String)] = [
       ("sidebar", "column-sidebar", "Lists to share", "list-grant-inbox"),
@@ -298,7 +325,7 @@ final class ArxUITests: XCTestCase {
       let count = matches.count
       var labelMatchesExpected = false
       var containsExpectedChild = false
-      var roleToken = "absent"
+      var roleToken = count > 1 ? "not-unique" : "absent"
       if count == 1 {
         let element = matches.firstMatch
         labelMatchesExpected = element.label == entry.label

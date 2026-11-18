@@ -51,6 +51,36 @@ import SwiftUI
 /// adopted as the probe's own. Children, frames, visibility, roles, and
 /// accessibility-element flags are never touched. The probe is a plain
 /// NSView in background layout.
+///
+/// The detail column's probe additionally carries a WINDOW ROOT experiment,
+/// active only in the DEBUG fixture dump configuration (the same flags that
+/// gate its records): in ordinary or release launches it installs nothing.
+/// From the validated split anchor - the column wrapper's own NSSplitView,
+/// proven an arranged container on the same visit - it walks strictly above
+/// the anchor toward the window's content view, collecting every ancestor
+/// that is already exposed (isAccessibilityElement() == true) and already
+/// carries the group role. Only when the walk actually reaches the content
+/// view on a complete, non-truncated path holding exactly one such ancestor
+/// does it install an identifier - never a label or role change - and only
+/// while that identifier is vacant. Whether even an identifier changes
+/// anything user-facing or audit-visible is observed by the harness and the
+/// strict audit, not assumed. Zero or multiple eligible ancestors, a
+/// missing or invalid split anchor, a truncated or broken path, a
+/// non-vacant identifier, a failed write-time or membership revalidation,
+/// or an install whose readback disagrees each end the experiment for that
+/// visit - reconciling any prior install away where one exists - and are
+/// reported as distinct bounded outcomes. A visit that loses its validated
+/// split anchor ends the root episode rather than leaving a stale
+/// identifier behind, and an episode whose install was never verified
+/// never retries it.
+/// The root experiment owns its own separate bookkeeping keyed on the full
+/// context (root, content view, window, split anchor) with the same
+/// exact-original restore rules, and the column bookkeeping above is
+/// untouched by it. The audit's remaining undescribed-group finding is
+/// bound to this element only when the finding's own element carries the
+/// installed identifier; a finding that persists without it is
+/// inconclusive, and a finding that disappears proves nothing about
+/// identity. This is an identification experiment, not a repair.
 struct ColumnAccessibilityProbe: NSViewRepresentable {
   enum Column {
     case sidebar
@@ -82,6 +112,9 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
     }
   }
 
+  /// Identifier installed by the window root experiment (detail probe only).
+  private static let rootIdentifier = "window-content"
+
   let column: Column
 
   final class Coordinator {
@@ -91,6 +124,12 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
     var labelChange: (original: String?, installed: String)?
     var identifierChange: (original: String, installed: String)?
     var targetRecordEmitted = false
+    weak var observedRoot: NSView?
+    weak var rootContentView: NSView?
+    weak var rootWindow: NSWindow?
+    weak var rootSplit: NSSplitView?
+    var rootIdentifierChange: (original: String, installed: String)?
+    var rootRecordOutcomes = Set<String>()
     var generation: UInt = 0
   }
 
@@ -117,10 +156,19 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
     Self.restore(coordinator)
   }
 
-  /// Ends the episode: restores each recorded change on the observed target
-  /// (while its current value still equals the installed one), then ALWAYS
-  /// clears the bookkeeping, including when the weak target is already gone.
+  /// Full teardown of both episodes (window detach, dismantle).
   private static func restore(_ coordinator: Coordinator) {
+    Self.restoreColumn(coordinator)
+    Self.restoreRoot(coordinator)
+  }
+
+  /// Ends the column episode only: restores each recorded change on the
+  /// observed target (while its current value still equals the installed
+  /// one), then ALWAYS clears the column bookkeeping, including when a weak
+  /// target is already gone. The root episode has its own context key and
+  /// is untouched here: only a real root/context change, an invalidated
+  /// path, or full teardown ends it.
+  private static func restoreColumn(_ coordinator: Coordinator) {
     if let target = coordinator.observed {
       if let change = coordinator.labelChange, target.accessibilityLabel() == change.installed {
         target.setAccessibilityLabel(change.original)
@@ -136,6 +184,23 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
     coordinator.observedColumn = nil
     coordinator.labelChange = nil
     coordinator.identifierChange = nil
+  }
+
+  /// Restores the root experiment's recorded identifier change (while the
+  /// current value still equals the installed one), then ALWAYS clears the
+  /// root bookkeeping, including when the weak target is already gone.
+  private static func restoreRoot(_ coordinator: Coordinator) {
+    if let root = coordinator.observedRoot,
+      let change = coordinator.rootIdentifierChange,
+      root.accessibilityIdentifier() == change.installed
+    {
+      root.setAccessibilityIdentifier(change.original)
+    }
+    coordinator.observedRoot = nil
+    coordinator.rootContentView = nil
+    coordinator.rootWindow = nil
+    coordinator.rootSplit = nil
+    coordinator.rootIdentifierChange = nil
   }
 
   /// True when `view`'s class is SwiftUI's hosting view of any content
@@ -168,6 +233,7 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
     var node = view.superview
     var hosting: NSView?
     var found: (container: NSView, target: NSView)?
+    var boundarySplit: NSSplitView?
     var hops = 0
     while let current = node, hops < 64 {
       if let split = current.superview as? NSSplitView, split.arrangedSubviews.contains(current) {
@@ -175,6 +241,7 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
         // Adopt only a hosting-view ancestor found strictly below this
         // container on the probe's own path; otherwise this column has no
         // target and the probe stays out of other layout levels.
+        boundarySplit = split
         if let target = hosting, target !== current {
           found = (container: current, target: target)
         }
@@ -205,35 +272,218 @@ struct ColumnAccessibilityProbe: NSViewRepresentable {
       {
         coordinator.identifierChange = nil
       }
+    } else {
+      // A different target, container, or column, or the first inspection:
+      // end the old column episode, then observe the new target. The root
+      // episode keeps its own context key and is untouched here: only a
+      // real root/context change, an invalidated path, or full teardown
+      // ends it.
+      Self.restoreColumn(coordinator)
+      if let located = found {
+        // Revalidate both relations at write time: the container must still
+        // be an arranged subview of its split view, and the target must
+        // still be its descendant on the probe's own path, in the main
+        // window.
+        if let split = located.container.superview as? NSSplitView,
+          split.arrangedSubviews.contains(located.container),
+          Self.isDescendant(located.target, of: located.container),
+          located.target.window === window
+        {
+          coordinator.observed = located.target
+          coordinator.observedContainer = located.container
+          coordinator.observedColumn = column
+          let target = located.target
+          let existingLabel = target.accessibilityLabel()
+          if existingLabel == nil || existingLabel == "" {
+            target.setAccessibilityLabel(column.label)
+            coordinator.labelChange = (original: existingLabel, installed: column.label)
+          }
+          let existingIdentifier = target.accessibilityIdentifier()
+          if existingIdentifier.isEmpty {
+            target.setAccessibilityIdentifier(column.identifier)
+            coordinator.identifierChange = (
+              original: existingIdentifier, installed: column.identifier
+            )
+          }
+          Self.emitTargetRecord(column: column, target: target, coordinator: coordinator)
+        }
+      }
+    }
+    if column == .detail {
+      if let split = boundarySplit {
+        updateRootTarget(anchoredAt: split, window: window, coordinator: coordinator)
+      } else {
+        // No validated split anchor this visit (the path lost its arranged
+        // boundary, or the walk hit its hop limit first): fail closed on
+        // the root experiment and reconcile any prior install away, rather
+        // than leave a stale identifier behind. A valid anchor with no
+        // hosting view below it still reaches updateRootTarget above; this
+        // branch is only the invalid-anchor case. The column episode is
+        // untouched.
+        Self.restoreRoot(coordinator)
+        Self.emitRootRecord(coordinator: coordinator, outcome: "no-anchor", eligible: 0)
+      }
+    } else {
+      // A reused coordinator whose column is no longer detail never runs
+      // the root experiment again: end any prior root episode rather than
+      // leave a stale identifier behind. No root record for a non-detail
+      // column.
+      Self.restoreRoot(coordinator)
+    }
+  }
+
+  /// The window root experiment, gated to the DEBUG fixture dump
+  /// configuration: outside it the experiment installs nothing. From the
+  /// validated split anchor (the column wrapper's own NSSplitView, proven
+  /// an arranged container on this same visit), walk strictly above the
+  /// anchor toward the window's content view, collecting every ancestor
+  /// that is already exposed and already carries the group role. Only a
+  /// complete, non-truncated path that actually reaches the content view
+  /// with exactly one eligible ancestor qualifies; every other shape fails
+  /// closed (any prior install reconciled away) with a distinct bounded
+  /// outcome. The experiment NEVER installs a label and never touches
+  /// roles, exposure, children, frames or visibility.
+  private func updateRootTarget(
+    anchoredAt split: NSSplitView, window: NSWindow, coordinator: Coordinator
+  ) {
+    guard Self.fixtureDumpConfiguration else { return }
+    guard let contentView = window.contentView else {
+      Self.restoreRoot(coordinator)
+      Self.emitRootRecord(coordinator: coordinator, outcome: "no-content-view", eligible: 0)
       return
     }
-    // A different target, container, or column, or the first inspection:
-    // end the old episode, then observe the new target.
-    Self.restore(coordinator)
-    guard let located = found else { return }
-    // Revalidate both relations at write time: the container must still be
-    // an arranged subview of its split view, and the target must still be
-    // its descendant on the probe's own path, in the main window.
-    guard let split = located.container.superview as? NSSplitView,
-      split.arrangedSubviews.contains(located.container),
-      Self.isDescendant(located.target, of: located.container),
-      located.target.window === window
-    else { return }
-    coordinator.observed = located.target
-    coordinator.observedContainer = located.container
-    coordinator.observedColumn = column
-    let target = located.target
-    let existingLabel = target.accessibilityLabel()
-    if existingLabel == nil || existingLabel == "" {
-      target.setAccessibilityLabel(column.label)
-      coordinator.labelChange = (original: existingLabel, installed: column.label)
+    var node = split.superview
+    var hops = 0
+    var reachedContent = false
+    var eligible: [NSView] = []
+    while let current = node, hops < 64 {
+      if current.isAccessibilityElement(), current.accessibilityRole() == .group {
+        eligible.append(current)
+      }
+      if current === contentView {
+        reachedContent = true
+        break
+      }
+      node = current.superview
+      hops += 1
     }
+    if !reachedContent {
+      // Fail closed: never install on a truncated or broken path, and
+      // reconcile any prior install away.
+      Self.restoreRoot(coordinator)
+      Self.emitRootRecord(
+        coordinator: coordinator, outcome: "path-truncated", eligible: eligible.count)
+      return
+    }
+    if eligible.count != 1 {
+      // Fail closed: eligibility drift reconciles any prior install away.
+      Self.restoreRoot(coordinator)
+      Self.emitRootRecord(
+        coordinator: coordinator,
+        outcome: eligible.isEmpty ? "no-eligible" : "multiple-eligible",
+        eligible: eligible.count)
+      return
+    }
+    let target = eligible[0]
+    // Explicit membership revalidation, independent of the walk's implicit
+    // proof: the anchor and the candidate must both still belong to this
+    // window's content hierarchy.
+    guard split.window === window, target.window === window,
+      Self.isDescendant(split, of: contentView), Self.isDescendant(target, of: contentView)
+    else {
+      // Fail closed: an anchor or candidate outside this window invalidates
+      // the whole episode claim, so reconcile any prior install away.
+      Self.restoreRoot(coordinator)
+      Self.emitRootRecord(coordinator: coordinator, outcome: "invalid-anchor", eligible: 1)
+      return
+    }
+    if let observed = coordinator.observedRoot, observed === target,
+      coordinator.rootContentView === contentView, coordinator.rootWindow === window,
+      coordinator.rootSplit === split
+    {
+      // Same root episode: the full context (root, content view, window,
+      // split anchor) still holds and the exact eligible path above the
+      // anchor was revalidated on this visit. Never re-install; keep the
+      // recorded change only while the current value still equals the
+      // installed one.
+      if let change = coordinator.rootIdentifierChange,
+        target.accessibilityIdentifier() != change.installed
+      {
+        coordinator.rootIdentifierChange = nil
+      }
+      return
+    }
+    // A different root or context, or the first inspection: end the old
+    // root episode, then examine the new one.
+    Self.restoreRoot(coordinator)
+    // Revalidate at write time: still exposed, still group role, still on
+    // the content view's chain strictly above the validated split anchor,
+    // still in the main window.
+    guard target.isAccessibilityElement(), target.accessibilityRole() == .group,
+      Self.isDescendant(target, of: contentView), Self.isDescendant(split, of: target),
+      target.window === window
+    else {
+      Self.emitRootRecord(coordinator: coordinator, outcome: "revalidation-failed", eligible: 1)
+      return
+    }
+    coordinator.observedRoot = target
+    coordinator.rootContentView = contentView
+    coordinator.rootWindow = window
+    coordinator.rootSplit = split
     let existingIdentifier = target.accessibilityIdentifier()
-    if existingIdentifier.isEmpty {
-      target.setAccessibilityIdentifier(column.identifier)
-      coordinator.identifierChange = (original: existingIdentifier, installed: column.identifier)
+    if !existingIdentifier.isEmpty {
+      Self.emitRootRecord(coordinator: coordinator, outcome: "foreign-id", eligible: 1)
+      return
     }
-    Self.emitTargetRecord(column: column, target: target, coordinator: coordinator)
+    target.setAccessibilityIdentifier(Self.rootIdentifier)
+    if target.accessibilityIdentifier() == Self.rootIdentifier {
+      coordinator.rootIdentifierChange = (
+        original: existingIdentifier, installed: Self.rootIdentifier
+      )
+      Self.emitRootRecord(coordinator: coordinator, outcome: "installed", eligible: 1)
+    } else {
+      // The write did not take: the readback is unexpected (the setter
+      // may have been rejected, normalized, or changed underneath us; the
+      // cause is not provable from here). Leave the current value
+      // exactly as found (never overwrite a foreign value), and keep the
+      // observed context with NO owned change record, so this episode
+      // never retries the install. Only a real context change examines a
+      // new root, and a still non-vacant identifier there reports
+      // foreign-id instead. Report the attempt separately from a
+      // readback-verified install.
+      Self.emitRootRecord(coordinator: coordinator, outcome: "install-unverified", eligible: 1)
+    }
+  }
+
+  /// True only in the DEBUG fixture dump configuration (the two flags the
+  /// fixture UI test launches pass). Gates the window root experiment
+  /// itself - installs and records - never the production column fix.
+  private static var fixtureDumpConfiguration: Bool {
+    #if DEBUG
+      let arguments = ProcessInfo.processInfo.arguments
+      return arguments.contains("--bridge-fixtures")
+        && arguments.contains("--arx-dump-view-hierarchy")
+    #else
+      return false
+    #endif
+  }
+
+  /// Bounded window-root observation record, emitted at most once per
+  /// distinct outcome per Coordinator instance (one line per distinct
+  /// outcome from the closed set above) and only in the DEBUG fixture dump
+  /// configuration: a closed outcome token and a bounded count, never
+  /// strings, frames or addresses. Each distinct outcome prints because an
+  /// early layout visit can legitimately precede eligibility.
+  private static func emitRootRecord(coordinator: Coordinator, outcome: String, eligible: Int) {
+    #if DEBUG
+      let arguments = ProcessInfo.processInfo.arguments
+      guard !coordinator.rootRecordOutcomes.contains(outcome),
+        arguments.contains("--bridge-fixtures"),
+        arguments.contains("--arx-dump-view-hierarchy")
+      else { return }
+      coordinator.rootRecordOutcomes.insert(outcome)
+      print("window-probe-target: outcome=\(outcome) eligible=\(eligible)")
+    #endif
   }
 
   /// Maps the observed role to a fixed token. Raw role strings never leave
