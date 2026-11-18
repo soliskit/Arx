@@ -16,7 +16,7 @@ struct ContentView: View {
     NavigationSplitView {
       VStack(alignment: .leading, spacing: 12) {
         if model.fixture {
-          Text("Fixture data - no real Reminders access").font(.caption).foregroundStyle(.orange)
+          Text("Fixture data - no real Reminders access").font(.caption).foregroundStyle(.primary)
         }
         if model.connected {
           List(model.lists, selection: $highlighted) { list in
@@ -50,6 +50,8 @@ struct ContentView: View {
             .borderedProminent)
         }
       }.padding().navigationTitle("Lists to share")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Lists to share")
         .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
     } detail: {
       ScrollView {
@@ -64,7 +66,7 @@ struct ContentView: View {
                 model.running || model.starting || model.stopping)
               Text(
                 "Keep the Mac, Arx and your connector running."
-              ).font(.caption).foregroundStyle(.secondary)
+              ).font(.caption).foregroundStyle(.primary)
               HStack {
                 Button(
                   model.running

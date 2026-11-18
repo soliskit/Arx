@@ -91,10 +91,12 @@ on describeNode(node)
   end tell
 end describeNode
 on findCheckbox(expectedID)
-  local root, nodes, matchCount, matchedNode, node
+  local nodes, matchCount, matchedNode, node
+  -- Search the whole window instead of a fixed structural path: SwiftUI's
+  -- container hierarchy changes with view modifiers, while the checkbox's
+  -- AXIdentifier is the stable contract this gate actually verifies.
   tell application "System Events" to tell process "Arx"
-    set root to outline 1 of scroll area 1 of group 1 of splitter group 1 of group 1 of window 1
-    set nodes to entire contents of root
+    set nodes to entire contents of window 1
   end tell
   set matchCount to 0
   set matchedNode to missing value

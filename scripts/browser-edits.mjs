@@ -12,6 +12,16 @@ export async function checkBrowserEdits({ evaluate, until, screenshot }) {
     await until("!busy");
   };
   try {
+    // Leave real values in the date/time controls before the edit below:
+    // WebKit keeps a programmatically cleared date/time control invalid,
+    // and saving an undated reminder must survive that engine state.
+    await evaluate(`(async () => {
+      await load({}, "inbox");
+      openEditor(null);
+      el("due-date").value = "2027-01-15";
+      el("due-time").value = "09:00";
+      el("cancel-edit").click();
+    })()`);
     await evaluate(`(async () => {
       const value = await api("/api/mutate", { operationID: crypto.randomUUID(), action: "create", listID: "inbox",
         fields: { title: "Line one\\nLine two", location: "Room\\nB", notes: "first\\r\\nsecond",
