@@ -48,6 +48,15 @@ final class ArxUITests: XCTestCase {
 
   @MainActor
   func testAccessibilityAudit() throws {
+    // Only the audit test requests the diagnostic dump: relaunch the fixture
+    // app with the dump argument. The DEBUG app prints its bounded view
+    // hierarchy to stdout, which xcodebuild captures into this run's
+    // .xcresult bundle (uploaded with the existing artifacts); extraction
+    // happens during analysis, not in the test.
+    app.terminate()
+    app = XCUIApplication()
+    app.launchArguments = ["--bridge-fixtures", "--arx-dump-view-hierarchy"]
+    app.launch()
     XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
     let application = app!
     // Collect every issue with its full description and element details

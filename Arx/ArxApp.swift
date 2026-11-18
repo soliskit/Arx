@@ -15,6 +15,7 @@ struct ArxApp: App {
       #if os(macOS)
         ContentView(model: model)
           .frame(minWidth: 680, minHeight: 420)
+          .onAppear { ViewHierarchyDump.runIfRequested(isFixture: model.fixture) }
       #else
         ContentView(model: model)
       #endif
