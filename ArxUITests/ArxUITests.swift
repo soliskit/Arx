@@ -57,13 +57,17 @@ final class ArxUITests: XCTestCase {
     app = XCUIApplication()
     app.launchArguments = ["--bridge-fixtures", "--arx-dump-view-hierarchy"]
     app.launch()
-    defer { corroborateColumnContainers() }
     XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
     let application = app!
+    // Container observations come first and are recorded as data with no
+    // assertions, so the observation step itself adds no abort before the
+    // audit. The full strict audit then runs regardless of what the
+    // observation found, and one combined assertion reports everything at
+    // the end. No defer: XCTest failure unwinding can skip deferred work.
+    var issues = columnContainerFindings(application)
     // Collect every issue with its full description and element details
     // before failing; the thrown error names only the issue type
     // ("Parent/Child mismatch"), never the element.
-    var issues: [String] = []
     // Capture the render the audit measures so contrast findings can be
     // checked against the actual pixels (window key state, dimming). The
     // pngRepresentation forces the capture now, before the audit runs
@@ -88,33 +92,53 @@ final class ArxUITests: XCTestCase {
     XCTAssertTrue(issues.isEmpty, issues.joined(separator: "\n---\n"))
   }
 
-  /// AX role and containment corroboration for the column container repair.
-  /// Runs from a defer so a throwing audit or a failing assertion cannot
-  /// skip it (a process abort still could). The column identifiers are fixed
-  /// values only the container probe installs (SwiftUI content never carries
-  /// them), so identifier matching cannot confuse the containers with
-  /// pre-existing SwiftUI-labeled content. Each match must be UNIQUE and
-  /// carry the exact label below - the literal English strings are valid
+  /// AX role and containment observation for the column container probe.
+  /// Asserts nothing: it records one fixed-token observation line per column
+  /// and returns failure strings, so it cannot abort the audit that runs
+  /// after it. Output is limited to the fixed sidebar/detail token, the
+  /// match count, and booleans; the actual AX label is compared internally
+  /// and never printed or embedded in a failure. The column identifiers are
+  /// fixed values only the container probe installs (SwiftUI content never
+  /// carries them), so identifier matching cannot confuse the containers
+  /// with pre-existing SwiftUI-labeled content. Each match must be UNIQUE
+  /// and carry the exact label below - the literal English strings are valid
   /// only because this fixture run is known to execute in English - and the
   /// known content must sit somewhere INSIDE the group: containment, not a
   /// direct-parent claim.
-  private func corroborateColumnContainers() {
-    let expected: [(identifier: String, label: String, child: String)] = [
-      ("column-sidebar", "Lists to share", "list-grant-inbox"),
-      ("column-detail", "Sharing", "bridge-start"),
+  private func columnContainerFindings(_ application: XCUIApplication) -> [String] {
+    let expected: [(token: String, identifier: String, label: String, child: String)] = [
+      ("sidebar", "column-sidebar", "Lists to share", "list-grant-inbox"),
+      ("detail", "column-detail", "Sharing", "bridge-start"),
     ]
+    var findings: [String] = []
     for entry in expected {
-      let matches = app.groups.matching(
+      let matches = application.groups.matching(
         NSPredicate(format: "identifier == %@", entry.identifier))
-      XCTAssertEqual(
-        matches.count, 1, "Expected exactly one AX group \"\(entry.identifier)\"")
-      guard matches.count == 1 else { continue }
-      let group = matches.firstMatch
-      XCTAssertEqual(
-        group.label, entry.label, "AX group \"\(entry.identifier)\" carries the wrong label")
-      XCTAssertTrue(
-        group.descendants(matching: .any)[entry.child].exists,
-        "AX group \"\(entry.identifier)\" does not contain \"\(entry.child)\"")
+      let count = matches.count
+      var labelMatchesExpected = false
+      var containsExpectedChild = false
+      if count == 1 {
+        let group = matches.firstMatch
+        labelMatchesExpected = group.label == entry.label
+        containsExpectedChild = group.descendants(matching: .any)[entry.child].exists
+      }
+      print(
+        "column probe observation: \(entry.token) count=\(count) labelMatchesExpected=\(labelMatchesExpected) containsExpectedChild=\(containsExpectedChild)"
+      )
+      if count != 1 {
+        findings.append(
+          "column probe: \(entry.token) expected exactly one AX group, found \(count)")
+      } else {
+        if !labelMatchesExpected {
+          findings.append(
+            "column probe: \(entry.token) AX group label did not match the expected label")
+        }
+        if !containsExpectedChild {
+          findings.append(
+            "column probe: \(entry.token) AX group does not contain the expected child")
+        }
+      }
     }
+    return findings
   }
 }
