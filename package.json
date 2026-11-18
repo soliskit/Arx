@@ -5,7 +5,7 @@
     "node": "26.13.0"
   },
   "scripts": {
-    "lint:js": "eslint BridgeCore/Web/app.js scripts/*.mjs eslint.config.mjs",
+    "lint:js": "eslint BridgeCore/Web/app.js BridgeCore/Web/logic.js scripts/*.mjs eslint.config.mjs",
     "lint:css": "stylelint BridgeCore/Web/style.css",
     "lint:html": "html-validate BridgeCore/Web/index.html",
     "format:check": "prettier --check BridgeCore/Web scripts/*.mjs eslint.config.mjs package.json lefthook.yml .github/workflows/build.yml .github/actionlint.yaml .stylelintrc.json .htmlvalidate.json",

@@ -65,6 +65,30 @@ export async function checkBrowserEdits({ evaluate, until, screenshot }) {
       Promise.resolve(),
     );
     await screenshot("05d-malformed-json-not-sent");
+    // A time without its date is refused before sending and keeps the editor.
+    await submit('el("due-date").value="";el("due-time").value="09:00"');
+    assert.match(
+      await evaluate('el("status").textContent'),
+      /A time needs its date/,
+    );
+    assert.deepEqual(
+      await evaluate(
+        '({count:window.editFixture.commands.length,unknown:JSON.stringify(uncertainWrites),editorOpen:!el("editor").hidden})',
+      ),
+      { ...before, editorOpen: true },
+    );
+    await submit(
+      'el("due-time").value="";el("start-date").value="";el("start-time").value="17:30"',
+    );
+    assert.match(
+      await evaluate('el("status").textContent'),
+      /A time needs its date/,
+    );
+    assert.equal(
+      await evaluate("window.editFixture.commands.length"),
+      before.count,
+    );
+    await submit('el("start-time").value=""');
     await submit(
       'el("alarms").value=\'[ {"relativeOffset":-900} ]\';el("repeats").value=\'[ {"frequency":"daily","interval":1} ]\';el("title").value="Changed text fixture";el("notes").value="";el("location").value=""',
     );

@@ -72,6 +72,7 @@ jobs:
       - name: Verify browser script syntax
         run: |
           node --check BridgeCore/Web/app.js
+          node --check BridgeCore/Web/logic.js
           node --check scripts/browser-proof.mjs
       - name: Build for macOS
         run: xcodebuild build -project Arx.xcodeproj -scheme Arx -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO -derivedDataPath .build
@@ -160,6 +161,7 @@ jobs:
           test -n "$CHROME_PATH"
           bash scripts/check-listener-exclusivity.sh .build/debug/BridgeFixtureServer
           node --test scripts/browser-startup.test.mjs
+          node --test scripts/web-logic.test.mjs
           node scripts/browser-proof.mjs .build/debug/BridgeFixtureServer browser-evidence
       - uses: actions/upload-artifact@v4
         if: always()
