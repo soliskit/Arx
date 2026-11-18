@@ -54,6 +54,7 @@ struct ContentView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Lists to share")
         .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
+        .background(ColumnAccessibilityProbe(column: .sidebar))
     } detail: {
       ScrollView {
         VStack(alignment: .leading, spacing: 20) {
@@ -132,6 +133,7 @@ struct ContentView: View {
       }.navigationTitle("Sharing")
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Sharing")
+        .background(ColumnAccessibilityProbe(column: .detail))
     }
     .onChange(of: model.rights.read) { _, enabled in
       if !enabled {

@@ -57,6 +57,7 @@ final class ArxUITests: XCTestCase {
     app = XCUIApplication()
     app.launchArguments = ["--bridge-fixtures", "--arx-dump-view-hierarchy"]
     app.launch()
+    defer { corroborateColumnContainers() }
     XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
     let application = app!
     // Collect every issue with its full description and element details
@@ -85,5 +86,35 @@ final class ArxUITests: XCTestCase {
     try? FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
     try? auditPNG.write(to: artifacts.appendingPathComponent("audit-window.png"))
     XCTAssertTrue(issues.isEmpty, issues.joined(separator: "\n---\n"))
+  }
+
+  /// AX role and containment corroboration for the column container repair.
+  /// Runs from a defer so a throwing audit or a failing assertion cannot
+  /// skip it (a process abort still could). The column identifiers are fixed
+  /// values only the container probe installs (SwiftUI content never carries
+  /// them), so identifier matching cannot confuse the containers with
+  /// pre-existing SwiftUI-labeled content. Each match must be UNIQUE and
+  /// carry the exact label below - the literal English strings are valid
+  /// only because this fixture run is known to execute in English - and the
+  /// known content must sit somewhere INSIDE the group: containment, not a
+  /// direct-parent claim.
+  private func corroborateColumnContainers() {
+    let expected: [(identifier: String, label: String, child: String)] = [
+      ("column-sidebar", "Lists to share", "list-grant-inbox"),
+      ("column-detail", "Sharing", "bridge-start"),
+    ]
+    for entry in expected {
+      let matches = app.groups.matching(
+        NSPredicate(format: "identifier == %@", entry.identifier))
+      XCTAssertEqual(
+        matches.count, 1, "Expected exactly one AX group \"\(entry.identifier)\"")
+      guard matches.count == 1 else { continue }
+      let group = matches.firstMatch
+      XCTAssertEqual(
+        group.label, entry.label, "AX group \"\(entry.identifier)\" carries the wrong label")
+      XCTAssertTrue(
+        group.descendants(matching: .any)[entry.child].exists,
+        "AX group \"\(entry.identifier)\" does not contain \"\(entry.child)\"")
+    }
   }
 }
