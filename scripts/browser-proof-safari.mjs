@@ -355,13 +355,36 @@ try {
   primaryError = error;
   process.stderr.write(`${String(error)}\n`);
   // Best-effort page state so a failed run names the actual page condition.
+  // Each probe is isolated: one failing field records its error and the
+  // rest still report.
   let pageState = "";
-  try {
-    if (sessionID) {
-      pageState = `${JSON.stringify(await evaluate('({status:el("status")&&el("status").textContent,busy:typeof busy==="undefined"?null:busy,editorOpen:!!el("editor")&&!el("editor").hidden,priority:el("priority")&&el("priority").value,editing:typeof editing==="undefined"?null:editing&&editing.fields?editing.fields.title:true,commands:window.editFixture?window.editFixture.commands.length:null,lastCommand:window.editFixture&&window.editFixture.commands.at(-1)?{action:window.editFixture.commands.at(-1).action,priority:window.editFixture.commands.at(-1).fields?window.editFixture.commands.at(-1).fields.priority:null}:null,uncertain:typeof uncertainWrites==="undefined"?null:uncertainWrites,errors:window.__arxErrors||null}'))}\n`;
-    }
-  } catch {
-    pageState = "page state unavailable\n";
+  if (sessionID) {
+    const probes = {
+      status: 'el("status")&&el("status").textContent',
+      busy: 'typeof busy==="undefined"?"<undef>":busy',
+      editing:
+        'typeof editing==="undefined"?"<undef>":editing===null?null:(editing.fields?editing.fields.title:"<no fields>")',
+      editorOpen: 'el("editor")?!el("editor").hidden:"<no editor>"',
+      priorityValue: 'el("priority")?el("priority").value:"<no priority>"',
+      commandActions:
+        'window.editFixture?JSON.stringify(window.editFixture.commands.map((c)=>({action:c.action,priority:c.fields?c.fields.priority:null}))):"<no fixture>"',
+      uncertain:
+        'typeof uncertainWrites==="undefined"?"<undef>":JSON.stringify(uncertainWrites)',
+      pageErrors: "JSON.stringify(window.__arxErrors||null)",
+      url: "location.href",
+    };
+    // Sequential probes deliberately reuse the one WebDriver session.
+    await Object.entries(probes).reduce(
+      (prior, [name, expression]) =>
+        prior.then(async () => {
+          try {
+            pageState += `${name}: ${JSON.stringify(await evaluate(expression))}\n`;
+          } catch (probeError) {
+            pageState += `${name}: <probe failed: ${String(probeError).slice(0, 300)}>\n`;
+          }
+        }),
+      Promise.resolve(),
+    );
   }
   writeFileSync(
     join(evidence, "failure.txt"),
