@@ -6,6 +6,7 @@
 //
 
 import BridgeCore
+import CoreLocation
 import EventKit
 import Foundation
 import Testing
@@ -191,5 +192,44 @@ import Testing
     #expect(reminder.title == "Edited")
     #expect(reminder.notes == nil && reminder.url == nil && reminder.location == nil)
     #expect(reminder.priority == 0)
+  }
+  // Reproduces issue #29: an edit that changes the alarm array rebuilds every
+  // alarm from the lossy wire format, silently degrading untouched siblings.
+  @Test func addingOneAlarmRebuildsUntouchedSiblingsFromLossyWireFormat() throws {
+    let adapter = EventKitStore()
+    // Detached, unsaved object only. No request for access or store fetch.
+    let reminder = EKReminder(eventStore: EKEventStore())
+    reminder.title = "Issue 29 fixture"
+    // Sibling with a custom sound: representable natively, absent from the wire format.
+    let audio = EKAlarm(relativeOffset: -600)
+    audio.soundName = "Basso"
+    // Sibling carrying both a date and a located structured location, proximity unset.
+    let datedLocation = EKAlarm(absoluteDate: Date(timeIntervalSince1970: 1_900_000_000))
+    let geo = EKStructuredLocation(title: "Office")
+    geo.geoLocation = CLLocation(latitude: 37.33, longitude: -122.03)
+    geo.radius = 100
+    datedLocation.structuredLocation = geo
+    // Sibling with a titled structured location but no coordinates.
+    let titleOnlyLocation = EKAlarm(relativeOffset: -1200)
+    titleOnlyLocation.structuredLocation = EKStructuredLocation(title: "Corner store")
+    reminder.alarms = [audio, datedLocation, titleOnlyLocation]
+    try #require(reminder.alarms?.count == 3)
+    try #require(reminder.alarms?[0].soundName == "Basso")
+    try #require(reminder.alarms?[1].absoluteDate != nil)
+    try #require(reminder.alarms?[1].proximity == .none)
+    let base = adapter.snapshot(reminder)
+    var fields = base.fields
+    fields.alarms.append(.init(relativeOffset: -300))
+    try adapter.apply(fields, to: reminder, preserving: base)
+    let rebuilt = try #require(reminder.alarms)
+    try #require(rebuilt.count == 4)
+    // The added alarm is present; the untouched siblings lost fidelity.
+    #expect(rebuilt.contains { $0.relativeOffset == -300 })
+    #expect(rebuilt.allSatisfy { $0.soundName == nil })
+    let located = rebuilt.filter { $0.structuredLocation?.geoLocation != nil }
+    #expect(located.count == 1)
+    #expect(located.first?.absoluteDate == nil)
+    #expect(located.first?.proximity == .leave)
+    #expect(rebuilt.allSatisfy { $0.structuredLocation?.title != "Corner store" })
   }
 }

@@ -134,7 +134,7 @@ import Foundation
   private func canonicalDate(_ date: Date) -> Date {
     Date(timeIntervalSince1970: floor(date.timeIntervalSince1970))
   }
-  private func snapshot(_ r: EKReminder) -> SharedReminder {
+  func snapshot(_ r: EKReminder) -> SharedReminder {
     var f = ReminderFields(title: r.title ?? "")
     f.notes = r.notes
     f.url = r.url?.absoluteString
