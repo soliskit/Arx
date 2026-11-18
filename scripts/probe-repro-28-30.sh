@@ -13,9 +13,16 @@ APP="${PWD}/.build/Build/Products/Debug/Arx.app"
 OUT="repro-probes.txt"
 : > "${OUT}"
 PID=""
+SECRET=""
 cleanup() {
   if [[ -n "${PID}" ]] && kill -0 "${PID}" 2>/dev/null; then
     kill "${PID}" 2>/dev/null || true
+    wait "${PID}" 2>/dev/null || true
+  fi
+  # Clear only the fixture-owned pairing secret, and only while the pasteboard
+  # still holds exactly it; never erase unrelated clipboard contents.
+  if [[ -n "${SECRET}" ]] && [[ "$(pbpaste 2>/dev/null || true)" == "${SECRET}" ]]; then
+    printf '' | pbcopy
   fi
 }
 trap cleanup EXIT
@@ -91,11 +98,14 @@ on logLabels()
     set nodes to entire contents of window 1
   end tell
   set wanted to {"list-grant-inbox", "list-grant-weekend", "list-grant-later", "list-grant-readonly"}
+  set found to {}
   repeat with nodeRef in nodes
     set node to contents of nodeRef
     if my optionalAttribute(node, "AXRole") is "AXCheckBox" then
       set identifier to my optionalAttribute(node, "AXIdentifier") as text
       if wanted contains identifier then
+        if found contains identifier then error "Duplicate list toggle identifier: " & identifier
+        set end of found to identifier
         log ("CHECKBOX|" & identifier)
         repeat with attributeRef in {"AXTitle", "AXDescription", "AXLabel", "AXHelp"}
           set attributeName to contents of attributeRef
@@ -104,6 +114,7 @@ on logLabels()
       end if
     end if
   end repeat
+  if (count of found) is not 4 then error "Expected 4 list toggles, found " & (count of found)
 end logLabels
 on run argv
   tell application "System Events" to tell process "Arx" to set frontmost to true
@@ -179,25 +190,37 @@ echo "== #30(a): client status before and after manual refresh ==" >>"${OUT}"
 native setfield 2 1 "Browser client"
 native press 2 1
 sleep 1
+{
+  echo "client rows BEFORE pair exchange (baseline):"
+  native clients
+} >>"${OUT}" 2>&1
 native press 2 2
 SECRET=$(pbpaste)
 if [[ -z "${SECRET}" ]]; then
   echo "HARNESS FAILURE: no pairing secret on the pasteboard" >>"${OUT}"
   exit 1
 fi
-if ! EXCHANGE=$(curl -sS --max-time 15 \
+PAIR_HEADERS=$(mktemp)
+PAIR_BODY=$(mktemp)
+HTTP_CODE=$(curl -sS --max-time 15 -D "${PAIR_HEADERS}" -o "${PAIR_BODY}" -w '%{http_code}' \
   -H "Host: bridge.example.test" \
   -H "X-Forwarded-Proto: https" \
   -H "Origin: https://bridge.example.test" \
   -H "Content-Type: application/json" \
   -d "{\"secret\":\"${SECRET}\"}" \
-  http://127.0.0.1:8765/api/pair); then
-  echo "HARNESS FAILURE: pair exchange request failed" >>"${OUT}"
+  http://127.0.0.1:8765/api/pair) || HTTP_CODE="curl-failed"
+ADMITTED=0
+if [[ "${HTTP_CODE}" == "200" ]] && grep -q '"csrf"' "${PAIR_BODY}" && grep -q '"rights"' "${PAIR_BODY}" && grep -qi '^set-cookie: __Host-arx=' "${PAIR_HEADERS}"; then
+  ADMITTED=1
+fi
+rm -f "${PAIR_HEADERS}" "${PAIR_BODY}"
+if [[ "${ADMITTED}" -ne 1 ]]; then
+  echo "HARNESS FAILURE: pair exchange not admitted (HTTP ${HTTP_CODE}); response contents withheld" >>"${OUT}"
   exit 1
 fi
 {
-  echo "pair exchange response: ${EXCHANGE}"
-  echo "client rows BEFORE manual refresh (pairing already exchanged):"
+  echo "pair exchange admitted: HTTP 200 with the session response shape and a session cookie; values withheld"
+  echo "client rows AFTER pair exchange, BEFORE manual refresh:"
   native clients
 } >>"${OUT}" 2>&1
 native press 3 1
@@ -206,11 +229,27 @@ sleep 1
   echo "client rows AFTER manual refresh:"
   native clients
 } >>"${OUT}" 2>&1
-echo "== #30(b): unrelated store change versus the failure message ==" >>"${OUT}"
+echo "== #30(b): status message across a simulated store change (status-overwrite facet only; the synthetic stopping state is NOT a real listener bind failure) ==" >>"${OUT}"
 launch --fixture-stopping --fixture-store-change
+BEFORE_SNAP=""
+for _ in $(seq 1 30); do
+  SNAP=$(native status 2>&1)
+  if [[ "${SNAP}" == *"Access revoked. Waiting for the local listener to stop."* ]]; then
+    BEFORE_SNAP="${SNAP}"
+    break
+  fi
+  if [[ "${SNAP}" == *"Choose lists and actions"* ]]; then
+    break
+  fi
+  sleep 1
+done
+if [[ -z "${BEFORE_SNAP}" ]]; then
+  echo "HARNESS INCONCLUSIVE: the stopping-state baseline message was not observed before the simulated store change" >>"${OUT}"
+  exit 1
+fi
 {
   echo "status BEFORE the simulated store change:"
-  native status
+  echo "${BEFORE_SNAP}"
 } >>"${OUT}" 2>&1
 sleep 12
 {

@@ -197,8 +197,10 @@ import Testing
   // alarm from the lossy wire format, silently degrading untouched siblings.
   @Test func addingOneAlarmRebuildsUntouchedSiblingsFromLossyWireFormat() throws {
     let adapter = EventKitStore()
-    // Detached, unsaved object only. No request for access or store fetch.
-    let reminder = EKReminder(eventStore: EKEventStore())
+    // Detached, unsaved objects only. No request for access or store fetch.
+    let store = EKEventStore()
+    let reminder = EKReminder(eventStore: store)
+    reminder.calendar = EKCalendar(for: .reminder, eventStore: store)
     reminder.title = "Issue 29 fixture"
     // Sibling with a custom sound: representable natively, absent from the wire format.
     let audio = EKAlarm(relativeOffset: -600)
@@ -213,10 +215,14 @@ import Testing
     let titleOnlyLocation = EKAlarm(relativeOffset: -1200)
     titleOnlyLocation.structuredLocation = EKStructuredLocation(title: "Corner store")
     reminder.alarms = [audio, datedLocation, titleOnlyLocation]
-    try #require(reminder.alarms?.count == 3)
-    try #require(reminder.alarms?[0].soundName == "Basso")
-    try #require(reminder.alarms?[1].absoluteDate != nil)
-    try #require(reminder.alarms?[1].proximity == .none)
+    let siblings = try #require(reminder.alarms)
+    try #require(siblings.count == 3)
+    try #require(siblings[0].soundName == "Basso")
+    try #require(siblings[1].absoluteDate != nil)
+    try #require(siblings[1].proximity == EKAlarmProximity.none)
+    try #require(siblings[1].structuredLocation?.geoLocation != nil)
+    try #require(siblings[2].structuredLocation != nil)
+    try #require(siblings[2].structuredLocation?.geoLocation == nil)
     let base = adapter.snapshot(reminder)
     var fields = base.fields
     fields.alarms.append(.init(relativeOffset: -300))
