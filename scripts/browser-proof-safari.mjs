@@ -77,15 +77,10 @@ const command = async (method, path, body) => {
   } catch {
     throw Error(`WebDriver HTTP ${response.status}: ${text.slice(0, 200)}`);
   }
-  // The protocol boundary is the HTTP status: errors are non-2xx with a
-  // string error code, while a 200 value is script data even when the page
-  // returns an object with its own error field. Keep the spec's error shape
-  // as a fallback for a driver that reports a protocol error with a 200.
-  if (
-    !response.ok ||
-    (typeof result.value?.error === "string" &&
-      typeof result.value?.stacktrace === "string")
-  ) {
+  // The protocol boundary is the HTTP status: errors are non-2xx, and a
+  // 200 value is script data even when the page returns an object with its
+  // own error field.
+  if (!response.ok) {
     throw Error(JSON.stringify(result.value));
   }
   return result.value;
