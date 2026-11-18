@@ -263,12 +263,23 @@ enum SectionsWorkerTransport {
   nonisolated static func call(action: String, fields: [String: String]) -> SectionsReply {
     let refused = SectionsReply(state: "unknown", reason: "worker_unavailable")
     guard let executable = Bundle.main.executableURL else { return refused }
+    return call(
+      executable: executable, arguments: ["--sections-local-worker"], action: action, fields: fields
+    )
+  }
+
+  // Synthetic tests substitute the child executable and arguments. The protocol,
+  // 10-second deadline, output bound and exit-status rules below stay identical.
+  nonisolated static func call(
+    executable: URL, arguments: [String], action: String, fields: [String: String]
+  ) -> SectionsReply {
+    let refused = SectionsReply(state: "unknown", reason: "worker_unavailable")
     var input = fields
     input["action"] = action
     guard let bytes = try? JSONEncoder().encode(input), bytes.count <= 4096 else { return refused }
     let process = Process()
     process.executableURL = executable
-    process.arguments = ["--sections-local-worker"]
+    process.arguments = arguments
     let stdin = Pipe()
     let stdout = Pipe()
     process.standardInput = stdin
@@ -306,6 +317,9 @@ enum SectionsWorkerTransport {
         return SectionsReply(state: "unknown", reason: "timeout")
       }
       let output = try stdout.fileHandleForReading.readToEnd() ?? Data()
+      if process.terminationReason == .exit && process.terminationStatus == 124 {
+        return SectionsReply(state: "unknown", reason: "timeout")
+      }
       guard output.count <= 16384,
         let result = try? JSONDecoder().decode(SectionsReply.self, from: output),
         [0, 69, 77].contains(process.terminationStatus)

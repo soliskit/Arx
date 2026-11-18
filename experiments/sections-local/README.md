@@ -15,7 +15,10 @@ dependency, account, tunnel or permission setting is changed.
   pipe, not a network request. It refuses missing existing full Reminders access.
   It never requests permission, starts a server, writes reminders or constructs
   a new private default store. An independently launched worker is NOT Arx client
-  authorization; this experiment must never become a network endpoint.
+  authorization; this experiment must never become a network endpoint. Combined
+  with `--sections-local-fixtures`, it instead refuses with `fixture_no_provider`
+  before any EventKit store, existing permission state or private provider is
+  touched; hosted same-app smoke checks use only that mode.
 - `--sections-local-fixtures`: visibly labeled synthetic UI. All results come
   from fixed model fixtures, with no child launch, EventKit store or private
   provider. `--sections-local-fixture-result` additionally previews the final
@@ -123,7 +126,13 @@ must remain unknown rather than prompting a guessed selector or broader access.
 
 Normal CI compiles the app and runs the existing package/native/browser checks.
 The added model tests instantiate only fixture models. Hosted screenshots launch
-only fixture UI, not the real experiment or worker. The special workflow compiles
+only fixture UI, not the real experiment or worker. Hosted ArxTests also drive
+the actual Swift parent transport against synthetic script children: input
+delivery, accepted and refused exit statuses, signal death, malformed and
+oversized output, the 10-second parent deadline and single-launch behavior, plus
+one same-app fixture-worker smoke. A child that exits at its own deadline (124)
+is reported with the fixed `timeout` reason instead of generic
+`worker_unavailable`. The special workflow compiles
 ExactReader/Worker with `ARX_SECTION_READER_FIXTURES=1`, links Foundation only and
 runs synthetic identity and transport tests. That macro compiles out all native
 EventKit/provider paths. No hosted step invokes a real Sections provider.

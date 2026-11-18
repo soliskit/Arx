@@ -53,6 +53,10 @@ static int refused(NSString *reason) {
 #if defined(ARX_SECTION_READER_FIXTURES)
             return output(@{ @"state": @"unknown", @"reason": @"fixture_no_provider" }, 69);
 #else
+            // Synthetic same-app mode: this argument refuses before any EventKit
+            // store, existing permission state or private provider is touched.
+            if ([NSProcessInfo.processInfo.arguments containsObject:@"--sections-local-fixtures"])
+                return output(@{ @"state": @"unknown", @"reason": @"fixture_no_provider" }, 69);
             // No requestFullAccess, TCC prompt, service, new identity or entitlement.
             if ([EKEventStore authorizationStatusForEntityType:EKEntityTypeReminder] != EKAuthorizationStatusFullAccess)
                 return refused(@"existing_permission_unavailable");
