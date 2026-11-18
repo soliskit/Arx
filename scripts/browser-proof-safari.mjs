@@ -212,6 +212,11 @@ try {
     url: "https://bridge.example.test:19443/",
   });
   await until('document.getElementById("secret")!==null');
+  // Collect page errors for the failure evidence; classic WebDriver has no
+  // console stream, and the fixture server logs only at critical level.
+  await evaluate(
+    'window.__arxErrors=[];window.addEventListener("error",(event)=>{window.__arxErrors.push(String(event.message));});window.addEventListener("unhandledrejection",(event)=>{window.__arxErrors.push(String((event.reason&&event.reason.stack)||event.reason));});',
+  );
   await until(
     'document.getElementById("status").textContent.includes("Pair this browser")',
   );
@@ -349,7 +354,19 @@ try {
 } catch (error) {
   primaryError = error;
   process.stderr.write(`${String(error)}\n`);
-  writeFileSync(join(evidence, "failure.txt"), `${String(error)}\n${logs}`);
+  // Best-effort page state so a failed run names the actual page condition.
+  let pageState = "";
+  try {
+    if (sessionID) {
+      pageState = `${JSON.stringify(await evaluate('({status:el("status")&&el("status").textContent,busy:typeof busy==="undefined"?null:busy,editorOpen:!!el("editor")&&!el("editor").hidden,priority:el("priority")&&el("priority").value,editing:typeof editing==="undefined"?null:editing&&editing.fields?editing.fields.title:true,commands:window.editFixture?window.editFixture.commands.length:null,lastCommand:window.editFixture&&window.editFixture.commands.at(-1)?{action:window.editFixture.commands.at(-1).action,priority:window.editFixture.commands.at(-1).fields?window.editFixture.commands.at(-1).fields.priority:null}:null,uncertain:typeof uncertainWrites==="undefined"?null:uncertainWrites,errors:window.__arxErrors||null}'))}\n`;
+    }
+  } catch {
+    pageState = "page state unavailable\n";
+  }
+  writeFileSync(
+    join(evidence, "failure.txt"),
+    `${String(error)}\n${pageState}${logs}`,
+  );
 } finally {
   try {
     if (sessionID) {
