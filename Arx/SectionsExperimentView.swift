@@ -302,35 +302,81 @@ enum SectionsWorkerTransport {
       }
       pthread_sigmask(SIG_SETMASK, &previous, nil)
     }
+    // One deadline bounds the whole exchange: launch, input write, run and output
+    // drain. The worker enforces SIGALRM at entry; this parent never waits longer.
     let until = DispatchTime.now().uptimeNanoseconds + 10_000_000_000
     do {
       try process.run()
+    } catch {
+      // A missing or unexecutable child refuses without consuming the deadline.
+      return refused
+    }
+    // Drain stdout while the child runs so a full pipe can never stall it into
+    // the deadline; bytes past the 16-KiB bound are counted and discarded.
+    let descriptor = stdout.fileHandleForReading.fileDescriptor
+    let flags = fcntl(descriptor, F_GETFL)
+    _ = fcntl(descriptor, F_SETFL, flags | O_NONBLOCK)
+    var output = Data()
+    var total = 0
+    var sawEOF = false
+    var readFailed = false
+    do {
       try stdin.fileHandleForWriting.write(contentsOf: bytes)
       try stdin.fileHandleForWriting.close()
-      // Worker enforces SIGALRM at entry; parent also kills it after 10 seconds.
-      while process.isRunning && DispatchTime.now().uptimeNanoseconds < until {
-        Thread.sleep(forTimeInterval: 0.025)
-      }
-      if process.isRunning {
-        kill(process.processIdentifier, SIGKILL)
-        process.waitUntilExit()
-        return SectionsReply(state: "unknown", reason: "timeout")
-      }
-      let output = try stdout.fileHandleForReading.readToEnd() ?? Data()
-      if process.terminationReason == .exit && process.terminationStatus == 124 {
-        return SectionsReply(state: "unknown", reason: "timeout")
-      }
-      guard output.count <= 16384,
-        let result = try? JSONDecoder().decode(SectionsReply.self, from: output),
-        [0, 69, 77].contains(process.terminationStatus)
-      else { return refused }
-      return result
     } catch {
+      // A fast refusal may close stdin first; the write fails and the child
+      // finishes on its own, so the exchange below decides the outcome.
+      try? stdin.fileHandleForWriting.close()
+    }
+    var chunk = [UInt8](repeating: 0, count: 8192)
+    drain: while DispatchTime.now().uptimeNanoseconds < until {
+      while true {
+        let count = chunk.withUnsafeMutableBytes { read(descriptor, $0.baseAddress, $0.count) }
+        if count > 0 {
+          total += count
+          if output.count < 16384 {
+            output.append(contentsOf: chunk.prefix(min(count, 16384 - output.count)))
+          }
+        } else if count == 0 {
+          sawEOF = true
+          break
+        } else if errno == EAGAIN || errno == EWOULDBLOCK {
+          break
+        } else {
+          readFailed = true
+          break drain
+        }
+      }
+      if sawEOF { break }
+      // A descendant holding stdout open after the child exits reaches this same
+      // deadline; the parent never blocks on a post-exit read again.
+      Thread.sleep(forTimeInterval: 0.025)
+    }
+    if readFailed {
       if process.isRunning {
         kill(process.processIdentifier, SIGKILL)
         process.waitUntilExit()
       }
       return refused
     }
+    if process.isRunning {
+      kill(process.processIdentifier, SIGKILL)
+      process.waitUntilExit()
+      return SectionsReply(state: "unknown", reason: "timeout")
+    }
+    process.waitUntilExit()
+    if !sawEOF {
+      // The child exited but its output stream never closed before the deadline.
+      return SectionsReply(state: "unknown", reason: "timeout")
+    }
+    if process.terminationReason == .exit && process.terminationStatus == 124 {
+      return SectionsReply(state: "unknown", reason: "timeout")
+    }
+    guard total <= 16384,
+      let result = try? JSONDecoder().decode(SectionsReply.self, from: output),
+      process.terminationReason == .exit,
+      [0, 69, 77].contains(process.terminationStatus)
+    else { return refused }
+    return result
   }
 }

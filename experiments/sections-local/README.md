@@ -25,8 +25,13 @@ dependency, account, tunnel or permission setting is changed.
   sanitized result. Hosted screenshots use only these modes.
 
 Each child has a process-wide 10-second alarm, and the parent kills its child at
-its own 10-second deadline. The membership deadline starts on Run, not during
-interactive setup. There are no worker retries. Input is limited to 4096 bytes;
+its own 10-second deadline. That one parent deadline bounds the whole exchange:
+launch, input write, run and output drain. The parent drains output while the
+child runs, so a full pipe can never stall the writer into the deadline; bytes
+past the output bound are counted and discarded. The exchange completes only at
+EOF, so a descendant holding the child's output pipe open ends the wait at the
+same deadline instead of blocking the parent. The membership deadline starts on
+Run, not during interactive setup. There are no worker retries. Input is limited to 4096 bytes;
 section-read output to 2048 bytes. Local account/list labels have a separate
 16384-byte/100-list bound and are never included in the copyable report. Timeout,
 crash, permission refusal, mismatch, missing metadata or unknown ends the
@@ -129,8 +134,11 @@ The added model tests instantiate only fixture models. Hosted screenshots launch
 only fixture UI, not the real experiment or worker. Hosted ArxTests also drive
 the actual Swift parent transport against synthetic script children: input
 delivery, accepted and refused exit statuses, signal death, malformed and
-oversized output, the 10-second parent deadline and single-launch behavior, plus
-one same-app fixture-worker smoke. A child that exits at its own deadline (124)
+oversized output, launch failure, early stdin close, a large valid reply across
+pipe capacity, a descendant holding the output pipe, the 10-second parent
+deadline and single-launch behavior, plus
+one same-app fixture-worker smoke. Every fixture script, directory and counter
+file a test creates is removed when that test finishes. A child that exits at its own deadline (124)
 is reported with the fixed `timeout` reason instead of generic
 `worker_unavailable`. The special workflow compiles
 ExactReader/Worker with `ARX_SECTION_READER_FIXTURES=1`, links Foundation only and

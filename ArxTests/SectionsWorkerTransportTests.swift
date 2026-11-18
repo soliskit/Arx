@@ -23,10 +23,21 @@ struct SectionsWorkerTransportTests {
     "scratchConfirmed": "yes",
   ]
 
-  private func makeChild(_ body: String) throws -> URL {
+  // Every fixture path a test creates is removed when the test instance drops.
+  private final class TempArtifacts {
+    var paths: [URL] = []
+    deinit {
+      for path in paths {
+        try? FileManager.default.removeItem(at: path)
+      }
+    }
+  }
+
+  private func makeChild(_ body: String, into artifacts: TempArtifacts) throws -> URL {
     let directory = FileManager.default.temporaryDirectory
       .appendingPathComponent("sections-transport-" + UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    artifacts.paths.append(directory)
     let script = directory.appendingPathComponent("child.sh")
     try ("#!/bin/sh\n" + body + "\n").write(to: script, atomically: true, encoding: .utf8)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
@@ -42,6 +53,7 @@ struct SectionsWorkerTransportTests {
   }
 
   @Test func launchWritesInputAndDecodesReply() async throws {
+    let artifacts = TempArtifacts()
     let child = try makeChild(
       """
       input=$(cat)
@@ -51,20 +63,21 @@ struct SectionsWorkerTransportTests {
       esac
       printf '%s' '{"state":"labels","reason":"local_selection_only","lists":[]}'
       exit 0
-      """)
+      """, into: artifacts)
     let reply = await call(child)
     #expect(reply.state == "labels")
     #expect(reply.lists?.isEmpty == true)
   }
 
   @Test func acceptedWorkerStatusesReturnReply() async throws {
+    let artifacts = TempArtifacts()
     for status in [69, 77] {
       let child = try makeChild(
         """
         cat > /dev/null
         printf '%s' '{"state":"unknown","reason":"fixture_no_provider"}'
         exit \(status)
-        """)
+        """, into: artifacts)
       let reply = await call(child, action: "read", fields: Self.readFields)
       #expect(reply.state == "unknown")
       #expect(reply.reason == "fixture_no_provider")
@@ -72,68 +85,132 @@ struct SectionsWorkerTransportTests {
   }
 
   @Test func unlistedExitStatusIsUnavailable() async throws {
+    let artifacts = TempArtifacts()
     let child = try makeChild(
       """
       cat > /dev/null
       printf '%s' '{"state":"section","reason":"exact_object_candidate","sectionMatched":true}'
       exit 1
-      """)
+      """, into: artifacts)
     let reply = await call(child, action: "read", fields: Self.readFields)
     #expect(reply.state == "unknown")
     #expect(reply.reason == "worker_unavailable")
   }
 
   @Test func workerDeadlineExitIsReportedAsTimeout() async throws {
+    let artifacts = TempArtifacts()
     let child = try makeChild(
       """
       cat > /dev/null
       exit 124
-      """)
+      """, into: artifacts)
     let reply = await call(child)
     #expect(reply.state == "unknown")
     #expect(reply.reason == "timeout")
   }
 
   @Test func signalDeathIsUnavailableNotTimeout() async throws {
+    let artifacts = TempArtifacts()
     let child = try makeChild(
       """
       cat > /dev/null
       kill -KILL $$
-      """)
+      """, into: artifacts)
     let reply = await call(child)
     #expect(reply.state == "unknown")
     #expect(reply.reason == "worker_unavailable")
   }
 
   @Test func malformedOutputIsUnavailable() async throws {
+    let artifacts = TempArtifacts()
     let child = try makeChild(
       """
       cat > /dev/null
       printf '%s' 'not a sections reply'
       exit 0
-      """)
+      """, into: artifacts)
     let reply = await call(child)
     #expect(reply.state == "unknown")
     #expect(reply.reason == "worker_unavailable")
   }
 
-  @Test func oversizedOutputIsUnavailable() async throws {
+  @Test func oversizedOutputIsUnavailableWithoutReachingTheDeadline() async throws {
+    let artifacts = TempArtifacts()
     let child = try makeChild(
       """
       cat > /dev/null
       dd if=/dev/zero bs=1024 count=20 2>/dev/null | tr '\\0' 'x'
       exit 0
-      """)
+      """, into: artifacts)
+    let started = Date()
+    let reply = await call(child)
+    let elapsed = Date().timeIntervalSince(started)
+    // The parent drains while the child runs, so a full pipe never stalls the
+    // writer into the deadline; oversize is classified from the byte count.
+    #expect(reply.state == "unknown")
+    #expect(reply.reason == "worker_unavailable")
+    #expect(elapsed < 8)
+  }
+
+  @Test func largeValidReplyDecodesAcrossPipeCapacity() async throws {
+    let artifacts = TempArtifacts()
+    let child = try makeChild(
+      """
+      cat > /dev/null
+      padding=$(head -c 15000 < /dev/zero | tr '\\0' 'x')
+      printf '{"state":"unknown","reason":"%s"}' "$padding"
+      exit 0
+      """, into: artifacts)
+    let reply = await call(child)
+    #expect(reply.state == "unknown")
+    #expect(reply.reason == String(repeating: "x", count: 15000))
+  }
+
+  @Test func nonexistentExecutableIsUnavailable() async throws {
+    let missing = FileManager.default.temporaryDirectory
+      .appendingPathComponent("sections-transport-missing-" + UUID().uuidString)
+    let reply = await call(missing)
+    #expect(reply.state == "unknown")
+    #expect(reply.reason == "worker_unavailable")
+  }
+
+  @Test func childClosingStdinEarlyIsUnavailable() async throws {
+    let artifacts = TempArtifacts()
+    let child = try makeChild(
+      """
+      exit 0
+      """, into: artifacts)
+    // Whether the input write lands first or meets EPIPE, the exchange refuses.
     let reply = await call(child)
     #expect(reply.state == "unknown")
     #expect(reply.reason == "worker_unavailable")
   }
 
+  @Test func descendantHoldingStdoutEndsAtTheDeadline() async throws {
+    let artifacts = TempArtifacts()
+    let child = try makeChild(
+      """
+      ( sleep 15 ) &
+      cat > /dev/null
+      printf '%s' '{"state":"labels","reason":"local_selection_only","lists":[]}'
+      exit 0
+      """, into: artifacts)
+    let started = Date()
+    let reply = await call(child)
+    let elapsed = Date().timeIntervalSince(started)
+    // The child replied and exited, but its descendant keeps stdout open; the
+    // parent stops waiting at the same deadline instead of reading forever.
+    #expect(reply.state == "unknown")
+    #expect(reply.reason == "timeout")
+    #expect(elapsed >= 8 && elapsed < 20)
+  }
+
   @Test func parentDeadlineStopsRunawayChild() async throws {
+    let artifacts = TempArtifacts()
     let child = try makeChild(
       """
       exec sleep 60
-      """)
+      """, into: artifacts)
     let started = Date()
     let reply = await call(child)
     let elapsed = Date().timeIntervalSince(started)
@@ -143,14 +220,16 @@ struct SectionsWorkerTransportTests {
   }
 
   @Test func refusalDoesNotRetryTheChild() async throws {
+    let artifacts = TempArtifacts()
     let countFile = FileManager.default.temporaryDirectory
       .appendingPathComponent("sections-launches-" + UUID().uuidString)
+    artifacts.paths.append(countFile)
     let child = try makeChild(
       """
       cat > /dev/null
       printf 'launched\\n' >> '\(countFile.path)'
       exit 1
-      """)
+      """, into: artifacts)
     let reply = await call(child)
     let launches = try String(contentsOf: countFile, encoding: .utf8)
       .split(separator: "\n").count
