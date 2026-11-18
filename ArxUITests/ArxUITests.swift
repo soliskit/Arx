@@ -70,11 +70,19 @@ final class ArxUITests: XCTestCase {
     // Collect every issue with its full description and element details
     // before failing; the thrown error names only the issue type
     // ("Parent/Child mismatch"), never the element.
-    // Capture the render the audit measures so contrast findings can be
-    // checked against the actual pixels (window key state, dimming). The
-    // pngRepresentation forces the capture now, before the audit runs
-    // (XCUIScreenshot's documented PNG data property on macOS).
+    // Capture a render shortly before the audit runs so contrast findings
+    // can be compared against those pixels (window key state, dimming).
+    // This is pre-audit state; it is not known to be the render the audit
+    // engine samples. The pngRepresentation forces the capture now, before
+    // the audit runs (XCUIScreenshot's documented PNG data property on
+    // macOS).
     let auditPNG = application.screenshot().pngRepresentation
+    // Pre-audit observations at the closest test-side point before the
+    // audit: a numeric state enum and the window enabled boolean. These
+    // sequential queries are not a read of the audit engine's own state.
+    // Observations only, never assertions.
+    print("pre-audit-app-state: \(application.state.rawValue)")
+    print("pre-audit-window-enabled: \(application.windows["main"].isEnabled)")
     let installedIdentifiers: Set<String> = ["column-sidebar", "column-detail", "window-content"]
     try application.performAccessibilityAudit { issue in
       var line = String(describing: issue)
