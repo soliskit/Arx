@@ -47,7 +47,9 @@ struct SectionsExperimentView: View {
           .disabled(!model.canRun || model.busy || model.finished)
         if model.finished {
           Text(
-            "Stopped. Do not retry this real read. Delete the temporary reminder and section in Apple Reminders, then close this app."
+            model.fixture
+              ? "Stopped. Synthetic fixture only: nothing was read from or created in Apple Reminders. Close this app."
+              : "Stopped. Do not retry this real read. Delete the temporary reminder and section in Apple Reminders, then close this app."
           )
           Text(model.report).textSelection(.enabled).accessibilityIdentifier("sections-report")
           Button("Copy sanitized result") {
