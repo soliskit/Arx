@@ -19,6 +19,101 @@ jobs:
             sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
           fi
           xcodebuild -version
+      - name: Probe how a clean Mac resolves the workspace lockfiles
+        run: |
+          set -euo pipefail
+          APP_RESOLVED=Arx.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          cp Package.resolved "$RUNNER_TEMP/root-committed.resolved"
+          cp "$APP_RESOLVED" "$RUNNER_TEMP/app-committed.resolved"
+          echo '== Probe A: first plain resolve on the pristine checkout =='
+          xcodebuild -resolvePackageDependencies -project Arx.xcodeproj -scheme Arx
+          git status --porcelain -- Package.resolved "$APP_RESOLVED"
+          cp Package.resolved "$RUNNER_TEMP/root-probe-a.resolved"
+          cp "$APP_RESOLVED" "$RUNNER_TEMP/app-probe-a.resolved"
+          python3 - "$RUNNER_TEMP" <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          temp = Path(sys.argv[1])
+          app = 'Arx.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved'
+          def load(path):
+              doc = json.loads(Path(path).read_text())
+              return doc, {p['identity']: p for p in doc['pins']}
+          def delta(before, after):
+              removed = sorted(set(before) - set(after))
+              added = sorted(set(after) - set(before))
+              changed = []
+              for name in sorted(set(before) & set(after)):
+                  a, b = before[name], after[name]
+                  diffs = [f for f in ('kind', 'location') if a.get(f) != b.get(f)]
+                  sa, sb = a.get('state', {}), b.get('state', {})
+                  diffs += [f'state.{f}' for f in ('revision', 'version', 'branch') if sa.get(f) != sb.get(f)]
+                  if diffs:
+                      changed.append((name, diffs))
+              return removed, added, changed
+          _, committed_root = load(temp / 'root-committed.resolved')
+          committed_app_doc, committed_app = load(temp / 'app-committed.resolved')
+          probe_root_doc, probe_root = load('Package.resolved')
+          probe_app_doc, probe_app = load(app)
+          for label, before, after in (('root', committed_root, probe_root), ('app', committed_app, probe_app)):
+              removed, added, changed = delta(before, after)
+              print(label, 'pins removed:', removed)
+              print(label, 'pins added:', added)
+              print(label, 'pins changed:', changed)
+          committed_root_doc = json.loads((temp / 'root-committed.resolved').read_text())
+          print('root originHash kept:', 'originHash' in probe_root_doc)
+          print('root originHash matches committed:', probe_root_doc.get('originHash') == committed_root_doc.get('originHash'))
+          print('app originHash kept:', 'originHash' in probe_app_doc)
+          print('app originHash matches committed:', probe_app_doc.get('originHash') == committed_app_doc.get('originHash'))
+          PYTHON
+          echo '== Probe A2: second plain resolve (idempotence) =='
+          xcodebuild -resolvePackageDependencies -project Arx.xcodeproj -scheme Arx
+          cmp -s Package.resolved "$RUNNER_TEMP/root-probe-a.resolved" && echo 'root lockfile stable across repeat resolve' || echo 'root lockfile CHANGED on repeat resolve'
+          cmp -s "$APP_RESOLVED" "$RUNNER_TEMP/app-probe-a.resolved" && echo 'app lockfile stable across repeat resolve' || echo 'app lockfile CHANGED on repeat resolve'
+          echo '== Probe B: regenerate the workspace lockfile from scratch =='
+          rm "$APP_RESOLVED"
+          xcodebuild -resolvePackageDependencies -project Arx.xcodeproj -scheme Arx
+          python3 - "$RUNNER_TEMP" <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          temp = Path(sys.argv[1])
+          app = Path('Arx.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved')
+          def load(path):
+              doc = json.loads(Path(path).read_text())
+              return doc, {p['identity']: p for p in doc['pins']}
+          def delta(before, after):
+              removed = sorted(set(before) - set(after))
+              added = sorted(set(after) - set(before))
+              changed = []
+              for name in sorted(set(before) & set(after)):
+                  a, b = before[name], after[name]
+                  diffs = [f for f in ('kind', 'location') if a.get(f) != b.get(f)]
+                  sa, sb = a.get('state', {}), b.get('state', {})
+                  diffs += [f'state.{f}' for f in ('revision', 'version', 'branch') if sa.get(f) != sb.get(f)]
+                  if diffs:
+                      changed.append((name, diffs))
+              return removed, added, changed
+          _, committed_root = load(temp / 'root-committed.resolved')
+          committed_app_doc, committed_app = load(temp / 'app-committed.resolved')
+          if not app.exists():
+              print('workspace lockfile was NOT regenerated')
+          else:
+              regen_doc, regen = load(app)
+              removed, added, changed = delta(committed_root, regen)
+              print('vs committed root - removed:', removed)
+              print('vs committed root - added:', added)
+              print('vs committed root - changed:', changed)
+              removed_a, added_a, changed_a = delta(committed_app, regen)
+              print('vs committed app - removed:', removed_a)
+              print('vs committed app - added:', added_a)
+              print('vs committed app - changed:', changed_a)
+              print('originHash regenerated:', 'originHash' in regen_doc)
+              print('originHash matches committed:', regen_doc.get('originHash') == committed_app_doc.get('originHash'))
+          PYTHON
+          git checkout -- Package.resolved "$APP_RESOLVED"
+          git diff --exit-code --stat -- Package.resolved "$APP_RESOLVED"
+          echo 'probe complete; committed lockfiles restored'
       - name: Resolve the pinned Xcode dependency graph
         run: |
           set -euo pipefail
@@ -30,59 +125,6 @@ jobs:
               return {p['identity']: p['state'] for p in json.loads(Path(path).read_text())['pins']}
           assert pins('Package.resolved') == pins('Arx.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved')
           PYTHON
-      - name: Probe how a clean Mac resolves the workspace lockfiles
-        run: |
-          set -euo pipefail
-          APP_RESOLVED=Arx.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
-          cp Package.resolved "$RUNNER_TEMP/root-before.resolved"
-          cp "$APP_RESOLVED" "$RUNNER_TEMP/app-before.resolved"
-          echo '== Probe A: plain resolve on the pristine checkout =='
-          xcodebuild -resolvePackageDependencies -project Arx.xcodeproj -scheme Arx
-          git status --porcelain -- Package.resolved "$APP_RESOLVED"
-          python3 - "$RUNNER_TEMP" <<'PYTHON'
-          import json
-          import sys
-          from pathlib import Path
-          temp = Path(sys.argv[1])
-          app = 'Arx.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved'
-          def pins(path):
-              return {p['identity']: p['state'] for p in json.loads(Path(path).read_text())['pins']}
-          root_before = pins(temp / 'root-before.resolved')
-          app_before = pins(temp / 'app-before.resolved')
-          root_after = pins('Package.resolved')
-          app_after = pins(app)
-          print('root pins changed by plain resolve:', root_before != root_after)
-          print('app pins changed by plain resolve:', app_before != app_after)
-          print('app pins removed:', sorted(set(app_before) - set(app_after)))
-          print('app pins added:', sorted(set(app_after) - set(app_before)))
-          print('app pins altered:', sorted(k for k in app_before.keys() & app_after.keys() if app_before[k] != app_after[k]))
-          PYTHON
-          echo '== Probe B: regenerate the workspace lockfile from scratch =='
-          rm "$APP_RESOLVED"
-          xcodebuild -resolvePackageDependencies -project Arx.xcodeproj -scheme Arx
-          python3 - "$RUNNER_TEMP" <<'PYTHON'
-          import json
-          import sys
-          from pathlib import Path
-          temp = Path(sys.argv[1])
-          app = Path('Arx.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved')
-          def pins(path):
-              return {p['identity']: p['state'] for p in json.loads(Path(path).read_text())['pins']}
-          if not app.exists():
-              print('workspace lockfile was NOT regenerated')
-          else:
-              root = pins(temp / 'root-before.resolved')
-              regen = pins(app)
-              print('regenerated app pins:', sorted(regen))
-              print('pins missing vs committed root:', sorted(set(root) - set(regen)))
-              for name in sorted(set(root) & set(regen)):
-                  if root[name] != regen[name]:
-                      print('pin differs:', name, root[name], '->', regen[name])
-              print('originHash present:', '"originHash"' in app.read_text())
-          PYTHON
-          git checkout -- Package.resolved "$APP_RESOLVED"
-          git diff --exit-code --stat -- Package.resolved "$APP_RESOLVED"
-          echo 'probe complete; committed lockfiles restored'
       - name: Verify Mac-only target settings
         run: |
           set -euo pipefail
