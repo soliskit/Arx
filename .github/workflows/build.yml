@@ -4,21 +4,124 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  lockfile-capture:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 27.2
+        run: |
+          if [ ! -d /Applications/Xcode_27.2.app ]; then
+            echo 'Xcode 27.2 is required but not present on this runner'
+            exit 1
+          fi
+          sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
+          xcodebuild -version
+          if ! xcodebuild -version | grep -qFx 'Xcode 27.2'; then
+            echo 'the effective Xcode version is not 27.2'
+            exit 1
+          fi
+      - name: Capture the generated workspace lockfile
+        run: |
+          set -euo pipefail
+          ROOT=Package.resolved
+          WS=Arx.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          trap 'git checkout -- "$ROOT" "$WS" 2>/dev/null || true' EXIT
+          mkdir -p "$RUNNER_TEMP/capture"
+          cp "$ROOT" "$RUNNER_TEMP/capture/committed-root.resolved"
+          cp "$WS" "$RUNNER_TEMP/capture/committed-workspace.resolved"
+          {
+            echo "== toolchain =="
+            xcodebuild -version
+            swift --version
+            sw_vers
+            echo "runner image: ${ImageOS:-unknown} ${ImageVersion:-unknown}"
+          } | tee "$RUNNER_TEMP/capture/facts.txt"
+          xcodebuild -resolvePackageDependencies -project Arx.xcodeproj -scheme Arx -onlyUsePackageVersionsFromResolvedFile
+          if cmp -s "$ROOT" "$RUNNER_TEMP/capture/committed-root.resolved"; then
+            echo 'root byte-unchanged after pinned resolve'
+          else
+            echo 'ROOT CHANGED after pinned resolve'
+            exit 1
+          fi
+          xcodebuild -resolvePackageDependencies -project Arx.xcodeproj -scheme Arx
+          cp "$WS" "$RUNNER_TEMP/capture/generated-workspace.resolved"
+          xcodebuild -resolvePackageDependencies -project Arx.xcodeproj -scheme Arx
+          if cmp -s "$WS" "$RUNNER_TEMP/capture/generated-workspace.resolved"; then
+            echo 'repeat resolve byte-identical'
+          else
+            echo 'REPEAT RESOLVE DIFFERS'
+            exit 1
+          fi
+          git checkout -- "$WS"
+          xcodebuild -resolvePackageDependencies -project Arx.xcodeproj -scheme Arx
+          if cmp -s "$WS" "$RUNNER_TEMP/capture/generated-workspace.resolved"; then
+            echo 'restore-regenerate byte-identical'
+          else
+            echo 'RESTORE-REGENERATE DIFFERS'
+            exit 1
+          fi
+          python3 - <<'PYCAPTURE'
+          import hashlib, json, os
+          from pathlib import Path
+          TOOL = 'lefthook-plugin'
+          cap = Path(os.environ['RUNNER_TEMP']) / 'capture'
+          root = json.loads(Path('Package.resolved').read_text())
+          gen_bytes = (cap / 'generated-workspace.resolved').read_bytes()
+          gen = json.loads(gen_bytes)
+          def pins(doc):
+              return {p['identity']: p for p in doc['pins']}
+          root_pins, gen_pins = pins(root), pins(gen)
+          assert TOOL in root_pins, 'tool pin missing from root'
+          assert set(gen_pins) == set(root_pins) - {TOOL}, (
+              f'generated pins differ: missing {sorted(set(root_pins) - {TOOL} - set(gen_pins))}, '
+              f'unexpected {sorted(set(gen_pins) - set(root_pins))}')
+          altered = sorted(n for n in gen_pins if gen_pins[n] != root_pins[n])
+          assert not altered, f'pin records altered: {altered}'
+          assert 'originHash' in gen, 'generated file lost originHash'
+          assert gen.get('version') == root.get('version'), 'format version differs'
+          lines = [
+              f"generated pins: {len(gen_pins)} (root {len(root_pins)} minus tool pin {TOOL})",
+              f"generated originHash: {gen['originHash']}",
+              f"generated file sha256: {hashlib.sha256(gen_bytes).hexdigest()}",
+              f"generated file bytes: {len(gen_bytes)}",
+              f"tool pin in root: {root_pins[TOOL]['state']}",
+          ]
+          with open(cap / 'facts.txt', 'a') as f:
+              f.write('\n== generated workspace lockfile ==\n' + '\n'.join(lines) + '\n')
+          print('\n'.join(lines))
+          PYCAPTURE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arx-workspace-lockfile-capture
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/capture/generated-workspace.resolved
+            ${{ runner.temp }}/capture/facts.txt
   build:
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode 27.2
         run: |
-          if [ -d /Applications/Xcode_27.2.app ]; then
-            sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
+          if [ ! -d /Applications/Xcode_27.2.app ]; then
+            echo 'Xcode 27.2 is required but not present on this runner'
+            exit 1
           fi
+          sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
           xcodebuild -version
+          if ! xcodebuild -version | grep -qFx 'Xcode 27.2'; then
+            echo 'the effective Xcode version is not 27.2'
+            exit 1
+          fi
       - name: Resolve the pinned Xcode dependency graph
         run: |
           set -euo pipefail
@@ -64,6 +167,9 @@ jobs:
           assert app.get('version') == root.get('version'), 'workspace lockfile format version differs'
           print(f'root lockfile exact; workspace pins match the approved root set minus tool pin {TOOL_PIN}')
           PYTHON
+          # The tracked lockfiles must already be what resolution produces: after the
+          # pinned and plain resolves, neither file may show any change.
+          git diff --exit-code -- Package.resolved Arx.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
       - name: Verify Mac-only target settings
         run: |
           set -euo pipefail
@@ -142,8 +248,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Select Xcode 27.2
         run: |
-          if [ -d /Applications/Xcode_27.2.app ]; then
-            sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
+          if [ ! -d /Applications/Xcode_27.2.app ]; then
+            echo 'Xcode 27.2 is required but not present on this runner'
+            exit 1
+          fi
+          sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
+          xcodebuild -version
+          if ! xcodebuild -version | grep -qFx 'Xcode 27.2'; then
+            echo 'the effective Xcode version is not 27.2'
+            exit 1
           fi
       - name: Compile and safely probe the fixture display script
         run: |
