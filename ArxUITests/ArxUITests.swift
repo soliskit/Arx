@@ -145,6 +145,30 @@ final class ArxUITests: XCTestCase {
       artifactName: "minimal-axgroup-audit-window.png")
   }
 
+  /// Delta 3 of the ladder: the COMBINATION of deltas 1 and 2 - the
+  /// column accessibility probes live AND the column containment-grouping
+  /// modifier pair applied - which is the exact AX configuration the full
+  /// app runs under the audit. The two single-delta runs did not
+  /// reproduce the Parent/Child mismatch; this run tests whether their
+  /// combination does. If the mismatch appears here but not in the
+  /// baseline or either single-delta run, the probes+grouping combination
+  /// is implicated in this environment; if it does not appear, the
+  /// combination does not reproduce it here and content, environment, and
+  /// other full-app differences remain open. Known and declared: the
+  /// fixture sidebar label "Fixture lists" duplicates the Outline's role
+  /// description (a fixture fidelity defect classified in the delta-2
+  /// review, immaterial to the per-element mismatch discrimination); it
+  /// is expected to recur here and is deliberately NOT repaired inside
+  /// this combined step - any label repair is its own reviewed change.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureProbesAXGroup() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-probes", "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-probes-axgroup-audit-window.png")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any
