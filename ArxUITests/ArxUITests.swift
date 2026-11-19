@@ -575,6 +575,60 @@ final class ArxUITests: XCTestCase {
       artifactName: "minimal-connection-caption-buttons-audit-window.png")
   }
 
+  /// Delta 12a of the ladder: the connection origin text field alone,
+  /// a REDUCTION of the reproducing delta-11a fields cell (same inner
+  /// VStack(alignment: .leading, spacing: 10).padding(6) shape, same
+  /// no-scroll family wrapper, verbatim connectionOriginField piece).
+  /// Plain sidebar, real labels, combo (probes+axgroup) base, unchanged
+  /// strict audit. Bounded readings, hypotheses only: if the mismatch
+  /// appears here, this single tested field (the origin field) alone
+  /// suffices for reproduction in this configuration; that says
+  /// nothing about any other text field generally. If it does not
+  /// appear, the origin field alone does not reproduce it here and a
+  /// single negative is not a causal exclusion. Geometry is NOT held
+  /// identical between cells; the actual window frame is recorded per
+  /// run and reported with the result, not assumed. A single run does
+  /// not establish recurrence. Known and declared: the plain sidebar
+  /// under the real label may show the delta-5b duplicate-role
+  /// coincidence; immaterial to the per-element mismatch
+  /// discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureConnectionOriginField() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-connection-origin-field", "--arx-minimal-real-labels",
+        "--arx-minimal-probes", "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-connection-origin-field-audit-window.png")
+  }
+
+  /// Delta 12b of the ladder: the connection port text field alone, a
+  /// REDUCTION of the reproducing delta-11a fields cell (same inner
+  /// VStack(alignment: .leading, spacing: 10).padding(6) shape, same
+  /// no-scroll family wrapper, verbatim connectionPortField piece).
+  /// Plain sidebar, real labels, combo (probes+axgroup) base, unchanged
+  /// strict audit. Bounded readings, hypotheses only: if the mismatch
+  /// appears here, this single tested field (the port field) alone
+  /// suffices for reproduction in this configuration; that says
+  /// nothing about any other text field generally. If it does not
+  /// appear, the port field alone does not reproduce it here and a
+  /// single negative is not a causal exclusion. Geometry is NOT held
+  /// identical between cells; the actual window frame is recorded per
+  /// run and reported with the result, not assumed. A single run does
+  /// not establish recurrence. Known and declared: the plain sidebar
+  /// under the real label may show the delta-5b duplicate-role
+  /// coincidence; immaterial to the per-element mismatch
+  /// discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureConnectionPortField() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-connection-port-field", "--arx-minimal-real-labels",
+        "--arx-minimal-probes", "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-connection-port-field-audit-window.png")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any

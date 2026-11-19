@@ -41,7 +41,11 @@
   /// --arx-minimal-connection-fields and
   /// --arx-minimal-connection-caption-buttons reduce the reproducing
   /// contents cell to its verbatim fields versus caption-plus-buttons
-  /// pieces, same inner shape and family).
+  /// pieces, same inner shape and family; delta 12:
+  /// --arx-minimal-connection-origin-field and
+  /// --arx-minimal-connection-port-field reduce the reproducing fields
+  /// cell to one verbatim text field each, same inner shape and
+  /// family).
   /// Running the unchanged strict accessibility audit against each step
   /// separates findings caused by that component from findings the audit
   /// engine or CI environment produces on any app. Never compiled into
@@ -207,6 +211,24 @@
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-connection-caption-buttons")
     }
 
+    /// True only when a control test passes
+    /// --arx-minimal-connection-origin-field: the detail column renders
+    /// only the connection origin text field in the same inner shape
+    /// and no-scroll family wrapper. Reduction of the reproducing
+    /// delta-11a fields cell.
+    private var connectionOriginFieldRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-connection-origin-field")
+    }
+
+    /// True only when a control test passes
+    /// --arx-minimal-connection-port-field: the detail column renders
+    /// only the connection port text field in the same inner shape and
+    /// no-scroll family wrapper. Reduction of the reproducing
+    /// delta-11a fields cell.
+    private var connectionPortFieldRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-connection-port-field")
+    }
+
     /// True only when a control test passes --arx-minimal-fixture-labels:
     /// forces the fixture label tokens even when content mode is on, so
     /// the content+fixture-labels cell of the 2x2 runs with the label
@@ -317,6 +339,10 @@
         connectionFieldsDetail
       } else if connectionCaptionButtonsRequested {
         connectionCaptionButtonsDetail
+      } else if connectionOriginFieldRequested {
+        connectionOriginFieldDetail
+      } else if connectionPortFieldRequested {
+        connectionPortFieldDetail
       } else {
         plainDetail
       }
@@ -537,6 +563,42 @@
       .navigationTitle("Sharing")
     }
 
+    /// Delta 12a: the connection origin text field alone (the
+    /// --arx-minimal-connection-origin-field cell). REDUCTION of the
+    /// reproducing delta-11a fields cell: same inner
+    /// VStack(alignment: .leading, spacing: 10).padding(6) shape
+    /// reduced to the verbatim connectionOriginField piece, same
+    /// family wrapper.
+    @ViewBuilder private var connectionOriginFieldDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 10) {
+          connectionOriginField
+        }
+        .padding(6)
+      }
+      .padding(24)
+      .frame(maxWidth: 760, alignment: .leading)
+      .navigationTitle("Sharing")
+    }
+
+    /// Delta 12b: the connection port text field alone (the
+    /// --arx-minimal-connection-port-field cell). REDUCTION of the
+    /// reproducing delta-11a fields cell: same inner
+    /// VStack(alignment: .leading, spacing: 10).padding(6) shape
+    /// reduced to the verbatim connectionPortField piece, same family
+    /// wrapper.
+    @ViewBuilder private var connectionPortFieldDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 10) {
+          connectionPortField
+        }
+        .padding(6)
+      }
+      .padding(24)
+      .frame(maxWidth: 760, alignment: .leading)
+      .navigationTitle("Sharing")
+    }
+
     /// The full box content in a plain VStack WITHOUT the ScrollView
     /// wrapper (the --arx-minimal-detail-noscroll cell): identical box
     /// content to contentDetail, container structure removed. The
@@ -611,10 +673,26 @@
 
     /// The connection box's two text fields, extracted verbatim in
     /// delta 11. Composed into connectionBoxContent and rendered alone
-    /// by the --arx-minimal-connection-fields cell.
+    /// by the --arx-minimal-connection-fields cell. Delta 12 composes
+    /// it from two verbatim named single-field sub-builders so the
+    /// origin-field and port-field cells render identical pieces.
     @ViewBuilder private var connectionFields: some View {
+      connectionOriginField
+      connectionPortField
+    }
+
+    /// The connection origin text field, extracted verbatim in
+    /// delta 12. Composed into connectionFields and rendered alone by
+    /// the --arx-minimal-connection-origin-field cell.
+    @ViewBuilder private var connectionOriginField: some View {
       TextField("Exact remote HTTPS origin", text: $origin)
         .textContentType(.URL)
+    }
+
+    /// The connection port text field, extracted verbatim in
+    /// delta 12. Composed into connectionFields and rendered alone by
+    /// the --arx-minimal-connection-port-field cell.
+    @ViewBuilder private var connectionPortField: some View {
       TextField("Local port", text: $port)
     }
 
