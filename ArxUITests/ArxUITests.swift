@@ -102,12 +102,50 @@ final class ArxUITests: XCTestCase {
   /// list.
   @MainActor
   func testAccessibilityAuditMinimalFixture() throws {
+    try runMinimalFixtureAudit(extraArguments: [], artifactName: "minimal-audit-window.png")
+  }
+
+  /// Delta 1 of the single-variable ladder: the SAME minimal fixture with
+  /// exactly one component from the full app added - its two column
+  /// accessibility probes, the only components there that mutate the AX
+  /// tree. --arx-minimal-probes selects them in the fixture;
+  /// --arx-dump-view-hierarchy activates the probes' DEBUG install path
+  /// (its stdout hierarchy dump has no call site in the minimal fixture,
+  /// so the only AX-tree change is the probes themselves, including the
+  /// detail probe's window-root experiment exactly as in the full app).
+  /// If the Parent/Child mismatch appears here but not in the baseline,
+  /// the probes are implicated in this environment; if it does not appear,
+  /// the probes alone do not reproduce it here and interactions unique to
+  /// the full app remain open. Every other condition is identical to the
+  /// baseline control above.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureProbes() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: ["--arx-minimal-probes", "--arx-dump-view-hierarchy"],
+      artifactName: "minimal-probes-audit-window.png")
+  }
+
+  /// Shared body of the minimal-fixture control runs: relaunch into the
+  /// minimal fixture with the given extra arguments, record the pre-audit
+  /// state observations and a window render (evidence for interpreting any
+  /// contrast finding against actual pixels, mirroring the full-app
+  /// audit's capture), then run the SAME strict audit handler as the
+  /// full-app audit and assert on its collected issues. Observations are
+  /// never assertions.
+  private func runMinimalFixtureAudit(extraArguments: [String], artifactName: String) throws {
     app.terminate()
     app = XCUIApplication()
-    app.launchArguments = ["--bridge-fixtures", "--arx-minimal-fixture"]
+    app.launchArguments = ["--bridge-fixtures", "--arx-minimal-fixture"] + extraArguments
     app.launch()
     XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
     let application = app!
+
+    print("pre-audit-app-state: \(application.state.rawValue)")
+    print("pre-audit-window-enabled: \(application.windows["main"].isEnabled)")
+    let auditPNG = application.screenshot().pngRepresentation
+    let artifacts = URL(fileURLWithPath: "/tmp/uitest-artifacts")
+    try? FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
+    try? auditPNG.write(to: artifacts.appendingPathComponent(artifactName))
 
     let issues = try strictAuditIssueLines(application)
     XCTAssertTrue(issues.isEmpty, issues.joined(separator: "\n---\n"))
