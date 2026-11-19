@@ -29,7 +29,10 @@
   /// container structure versus box content; delta 8:
   /// --arx-minimal-detail-boxes and --arx-minimal-detail-texts split
   /// the box content into group boxes versus texts, same no-scroll
-  /// family).
+  /// family; delta 9: --arx-minimal-detail-box-connection,
+  /// --arx-minimal-detail-box-new-client and
+  /// --arx-minimal-detail-box-clients reduce the reproducing boxes
+  /// cell to one group box each, same no-scroll family).
   /// Running the unchanged strict accessibility audit against each step
   /// separates findings caused by that component from findings the audit
   /// engine or CI environment produces on any app. Never compiled into
@@ -133,6 +136,30 @@
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-detail-texts")
     }
 
+    /// True only when a control test passes
+    /// --arx-minimal-detail-box-connection: the detail column renders
+    /// only the connection group box in the same no-scroll VStack
+    /// family. One-box reduction of the delta-8a boxes cell.
+    private var detailBoxConnectionRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-detail-box-connection")
+    }
+
+    /// True only when a control test passes
+    /// --arx-minimal-detail-box-new-client: the detail column renders
+    /// only the new-client group box in the same no-scroll VStack
+    /// family. One-box reduction of the delta-8a boxes cell.
+    private var detailBoxNewClientRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-detail-box-new-client")
+    }
+
+    /// True only when a control test passes
+    /// --arx-minimal-detail-box-clients: the detail column renders only
+    /// the clients group box in the same no-scroll VStack family.
+    /// One-box reduction of the delta-8a boxes cell.
+    private var detailBoxClientsRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-detail-box-clients")
+    }
+
     /// True only when a control test passes --arx-minimal-fixture-labels:
     /// forces the fixture label tokens even when content mode is on, so
     /// the content+fixture-labels cell of the 2x2 runs with the label
@@ -229,6 +256,12 @@
         boxesDetail
       } else if detailTextsRequested {
         textsDetail
+      } else if detailBoxConnectionRequested {
+        connectionBoxDetail
+      } else if detailBoxNewClientRequested {
+        newClientBoxDetail
+      } else if detailBoxClientsRequested {
+        clientsBoxDetail
       } else {
         plainDetail
       }
@@ -341,6 +374,42 @@
         bridgeTitle
         bridgeStatus
         revokeCaption
+      }
+      .padding(24)
+      .frame(maxWidth: 760, alignment: .leading)
+      .navigationTitle("Sharing")
+    }
+
+    /// The connection group box alone in the no-scroll VStack family
+    /// (the --arx-minimal-detail-box-connection cell): the same wrapper
+    /// as boxesDetail, reduced to this one box.
+    @ViewBuilder private var connectionBoxDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        connectionBox
+      }
+      .padding(24)
+      .frame(maxWidth: 760, alignment: .leading)
+      .navigationTitle("Sharing")
+    }
+
+    /// The new-client group box alone in the no-scroll VStack family
+    /// (the --arx-minimal-detail-box-new-client cell): the same wrapper
+    /// as boxesDetail, reduced to this one box.
+    @ViewBuilder private var newClientBoxDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        newClientBox
+      }
+      .padding(24)
+      .frame(maxWidth: 760, alignment: .leading)
+      .navigationTitle("Sharing")
+    }
+
+    /// The clients group box alone in the no-scroll VStack family (the
+    /// --arx-minimal-detail-box-clients cell): the same wrapper as
+    /// boxesDetail, reduced to this one box.
+    @ViewBuilder private var clientsBoxDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        clientsBox
       }
       .padding(24)
       .frame(maxWidth: 760, alignment: .leading)

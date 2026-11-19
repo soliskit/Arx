@@ -405,6 +405,74 @@ final class ArxUITests: XCTestCase {
       artifactName: "minimal-detail-texts-audit-window.png")
   }
 
+  /// Delta 9a of the ladder: the connection group box alone in the
+  /// no-scroll VStack family, a one-box source/config reduction of the
+  /// reproducing delta-8a boxes cell. Plain sidebar, real labels, combo
+  /// (probes+axgroup) base, unchanged strict audit. Bounded readings,
+  /// hypotheses only: if the mismatch appears here, this one box alone
+  /// is sufficient for reproduction in this configuration (and the
+  /// other two boxes are not necessary here); if it does not appear,
+  /// this box alone does not reproduce it here and a single negative
+  /// is not a causal exclusion. Geometry is NOT held identical between
+  /// cells; the actual window frame is recorded per run and reported
+  /// with the result, not assumed. A single run does not establish
+  /// recurrence. Known and declared: the plain sidebar under the real
+  /// label may show the delta-5b duplicate-role coincidence;
+  /// immaterial to the per-element mismatch discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureDetailBoxConnection() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-detail-box-connection", "--arx-minimal-real-labels", "--arx-minimal-probes",
+        "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-detail-box-connection-audit-window.png")
+  }
+
+  /// Delta 9b of the ladder: the new-client group box alone in the
+  /// no-scroll VStack family, same reduction as 9a. Bounded readings,
+  /// hypotheses only: if the mismatch appears here, this one box alone
+  /// is sufficient for reproduction in this configuration (and the
+  /// other two boxes are not necessary here); if it does not appear,
+  /// this box alone does not reproduce it here and a single negative
+  /// is not a causal exclusion. Geometry is NOT held identical between
+  /// cells; the actual window frame is recorded per run and reported
+  /// with the result, not assumed. A single run does not establish
+  /// recurrence. Known and declared: the plain sidebar under the real
+  /// label may show the delta-5b duplicate-role coincidence;
+  /// immaterial to the per-element mismatch discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureDetailBoxNewClient() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-detail-box-new-client", "--arx-minimal-real-labels", "--arx-minimal-probes",
+        "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-detail-box-new-client-audit-window.png")
+  }
+
+  /// Delta 9c of the ladder: the clients group box alone in the
+  /// no-scroll VStack family, same reduction as 9a. Bounded readings,
+  /// hypotheses only: if the mismatch appears here, this one box alone
+  /// is sufficient for reproduction in this configuration (and the
+  /// other two boxes are not necessary here); if it does not appear,
+  /// this box alone does not reproduce it here and a single negative
+  /// is not a causal exclusion. Geometry is NOT held identical between
+  /// cells; the actual window frame is recorded per run and reported
+  /// with the result, not assumed. A single run does not establish
+  /// recurrence. Known and declared: the plain sidebar under the real
+  /// label may show the delta-5b duplicate-role coincidence;
+  /// immaterial to the per-element mismatch discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureDetailBoxClients() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-detail-box-clients", "--arx-minimal-real-labels", "--arx-minimal-probes",
+        "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-detail-box-clients-audit-window.png")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any
