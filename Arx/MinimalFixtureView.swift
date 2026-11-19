@@ -18,7 +18,10 @@
   /// the two column accessibilityElement(children: .contain) +
   /// accessibilityLabel pairs; delta 4: --arx-minimal-content replaces
   /// the plain placeholder content with a faithful replica of the full
-  /// app's fixture-mode content shape, taken from ContentView.swift).
+  /// app's fixture-mode content shape, taken from ContentView.swift;
+  /// delta 5: --arx-minimal-fixture-labels and --arx-minimal-real-labels
+  /// isolate the column-label variable from the content variable to
+  /// fill the remaining cells of the content x labels grid).
   /// Running the unchanged strict accessibility audit against each step
   /// separates findings caused by that component from findings the audit
   /// engine or CI environment produces on any app. Never compiled into
@@ -45,12 +48,46 @@
     /// True only when a control test passes --arx-minimal-content: the
     /// single-delta switch that swaps the plain placeholder content for
     /// the full app's fixture-mode content shape. In content mode the
-    /// column titles and accessibility labels are the full app's real
-    /// strings ("Lists to share", "Sharing"), not the fixture tokens -
-    /// an explicit fidelity choice, so the delta-2 "Fixture lists"
-    /// duplicate-role finding is not expected in content-mode runs.
+    /// column titles and accessibility labels default to the full app's
+    /// real strings ("Lists to share", "Sharing"), not the fixture
+    /// tokens - an explicit fidelity choice, so the delta-2
+    /// "Fixture lists" duplicate-role finding is not expected in
+    /// content-mode runs. The two label switches below can override that
+    /// default in either direction to fill the 2x2 of {plain, full
+    /// content} x {fixture, real labels} as separate configurations.
     private var contentRequested: Bool {
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-content")
+    }
+
+    /// True only when a control test passes --arx-minimal-fixture-labels:
+    /// forces the fixture label tokens even when content mode is on, so
+    /// the content+fixture-labels cell of the 2x2 runs with the label
+    /// variable isolated from the content variable.
+    private var fixtureLabelsRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-fixture-labels")
+    }
+
+    /// True only when a control test passes --arx-minimal-real-labels:
+    /// forces the full app's real column labels on plain placeholder
+    /// content, so the plain-content+real-labels cell of the 2x2 runs
+    /// with the label variable isolated from the content variable.
+    private var realLabelsRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-real-labels")
+    }
+
+    /// The single label decision for both columns: real labels when
+    /// explicitly requested, or in content mode unless fixture labels
+    /// are explicitly forced; fixture tokens otherwise.
+    private var useRealLabels: Bool {
+      realLabelsRequested || (contentRequested && !fixtureLabelsRequested)
+    }
+
+    private var sidebarColumnLabel: String {
+      useRealLabels ? "Lists to share" : "Fixture lists"
+    }
+
+    private var detailColumnLabel: String {
+      useRealLabels ? "Sharing" : "Fixture Sharing"
     }
 
     @State private var highlighted: String?
@@ -84,8 +121,7 @@
         sidebarColumn
           .modifier(
             ColumnAXGroup(
-              label: contentRequested
-                ? "Lists to share" : "Fixture lists",
+              label: sidebarColumnLabel,
               enabled: axGroupRequested)
           )
           .background(sidebarProbe)
@@ -93,8 +129,7 @@
         detailColumn
           .modifier(
             ColumnAXGroup(
-              label: contentRequested
-                ? "Sharing" : "Fixture Sharing",
+              label: detailColumnLabel,
               enabled: axGroupRequested)
           )
           .background(detailProbe)

@@ -199,6 +199,61 @@ final class ArxUITests: XCTestCase {
       artifactName: "minimal-content-audit-window.png")
   }
 
+  /// Delta 5a of the ladder: the content+fixture-labels cell of the
+  /// content x labels grid. Identical to the delta-4 content run except
+  /// that --arx-minimal-fixture-labels forces the fixture label tokens
+  /// ("Fixture lists", "Fixture Sharing") on the column accessibility
+  /// groups, isolating the label variable from the content variable.
+  /// Existing cells: plain+fixture-labels (combo run: no mismatch) and
+  /// content+real-labels (delta-4: mismatch reproduced). Bounded
+  /// readings of this cell, hypotheses only: if the mismatch appears
+  /// here, the real labels are not necessary for reproduction in this
+  /// configuration (content alone suffices here); that says nothing
+  /// about labels generally. If it does not appear, content with fixture
+  /// labels does not reproduce it here; a single negative is not a
+  /// causal exclusion. Known and declared: the fixture labels reinstate
+  /// the delta-2 duplicate-role label infidelity in this cell, so the
+  /// duplicate-role finding is expected here as in the axgroup/combo
+  /// runs; it remains immaterial to the per-element mismatch
+  /// discrimination. A single run does not establish recurrence.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureContentFixtureLabels() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-content", "--arx-minimal-fixture-labels", "--arx-minimal-probes",
+        "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-content-fixture-labels-audit-window.png")
+  }
+
+  /// Delta 5b of the ladder: the plain-content+real-labels cell of the
+  /// content x labels grid. Identical to the combo run except that
+  /// --arx-minimal-real-labels forces the full app's real column labels
+  /// ("Lists to share", "Sharing") on the plain placeholder content,
+  /// isolating the label variable from the content variable. Bounded
+  /// readings of this cell, hypotheses only: if the mismatch appears
+  /// here, real labels alone reproduce it in this configuration; if it
+  /// does not appear, real labels on plain content do not reproduce it
+  /// here and a single negative is not a causal exclusion. If neither
+  /// new cell reproduces while the content+real-labels cell did, the
+  /// joint combination is what reproduced in this environment - an
+  /// interaction observation about these runs, not proof of mechanism.
+  /// Known and declared: whether the real label "Lists to share"
+  /// duplicates the plain List Outline's role description is unknown
+  /// (the full app shows no duplicate-role finding); if one appears
+  /// here it is a label-coincidence observation about this cell,
+  /// immaterial to the per-element mismatch discrimination. A single
+  /// run does not establish recurrence.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureRealLabels() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-real-labels", "--arx-minimal-probes", "--arx-minimal-axgroup",
+        "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-real-labels-audit-window.png")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any
