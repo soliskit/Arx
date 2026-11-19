@@ -254,6 +254,56 @@ final class ArxUITests: XCTestCase {
       artifactName: "minimal-real-labels-audit-window.png")
   }
 
+  /// Delta 6a of the ladder: the sidebar half of the content variable.
+  /// Identical to the delta-4 content run except that only the sidebar
+  /// column renders the full content shape (banner capsule, grant-list
+  /// rows, Refresh button); the detail column stays plain. Real labels
+  /// on both columns, on the combo (probes+axgroup) base, matching the
+  /// delta-4 base so this cell differs from the reproducing content
+  /// cell by exactly the detail content. Bounded readings, hypotheses
+  /// only: if the mismatch appears here, the detail content is not
+  /// necessary for reproduction in this configuration; if it does not
+  /// appear, sidebar-only content does not reproduce it here and a
+  /// single negative is not a causal exclusion. If neither half
+  /// reproduces while the union did, that is an interaction observation
+  /// about these runs, not proof of mechanism. A single run does not
+  /// establish recurrence. Known and declared: the plain detail column
+  /// under a real label may show the plain-content duplicate-role
+  /// coincidence observed in the delta-5 cells; immaterial to the
+  /// per-element mismatch discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureSidebarContent() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-sidebar-content", "--arx-minimal-real-labels", "--arx-minimal-probes",
+        "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-sidebar-content-audit-window.png")
+  }
+
+  /// Delta 6b of the ladder: the detail half of the content variable.
+  /// Identical to the delta-4 content run except that only the detail
+  /// column renders the full content shape (bridge status, the three
+  /// group boxes); the sidebar column stays plain. Real labels on both
+  /// columns, on the combo (probes+axgroup) base. Bounded readings,
+  /// hypotheses only: if the mismatch appears here, the sidebar content
+  /// is not necessary for reproduction in this configuration; if it
+  /// does not appear, detail-only content does not reproduce it here
+  /// and a single negative is not a causal exclusion. A single run does
+  /// not establish recurrence. Known and declared: the plain sidebar
+  /// column under the real label "Lists to share" is the delta-5b cell
+  /// shape and may show its duplicate-role coincidence; immaterial to
+  /// the per-element mismatch discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureDetailContent() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-detail-content", "--arx-minimal-real-labels", "--arx-minimal-probes",
+        "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-detail-content-audit-window.png")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any

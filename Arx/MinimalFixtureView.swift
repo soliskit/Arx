@@ -21,7 +21,10 @@
   /// app's fixture-mode content shape, taken from ContentView.swift;
   /// delta 5: --arx-minimal-fixture-labels and --arx-minimal-real-labels
   /// isolate the column-label variable from the content variable to
-  /// fill the remaining cells of the content x labels grid).
+  /// fill the remaining cells of the content x labels grid; delta 6:
+  /// --arx-minimal-sidebar-content and --arx-minimal-detail-content
+  /// bisect the content variable by column, with --arx-minimal-content
+  /// kept as their union).
   /// Running the unchanged strict accessibility audit against each step
   /// separates findings caused by that component from findings the audit
   /// engine or CI environment produces on any app. Never compiled into
@@ -57,6 +60,36 @@
     /// content} x {fixture, real labels} as separate configurations.
     private var contentRequested: Bool {
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-content")
+    }
+
+    /// True only when a control test passes --arx-minimal-sidebar-content:
+    /// selects the full content shape for the sidebar column only,
+    /// leaving the detail column plain. --arx-minimal-content is the
+    /// union of this and --arx-minimal-detail-content, preserving its
+    /// delta-4 meaning, so this switch isolates the sidebar half of the
+    /// content variable.
+    private var sidebarContentRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-sidebar-content")
+    }
+
+    /// True only when a control test passes --arx-minimal-detail-content:
+    /// selects the full content shape for the detail column only,
+    /// leaving the sidebar plain. Isolates the detail half of the
+    /// content variable.
+    private var detailContentRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-detail-content")
+    }
+
+    /// True when the sidebar column renders the full content shape:
+    /// the whole-content switch (union) or the sidebar half.
+    private var sidebarContentActive: Bool {
+      contentRequested || sidebarContentRequested
+    }
+
+    /// True when the detail column renders the full content shape:
+    /// the whole-content switch (union) or the detail half.
+    private var detailContentActive: Bool {
+      contentRequested || detailContentRequested
     }
 
     /// True only when a control test passes --arx-minimal-fixture-labels:
@@ -137,7 +170,7 @@
     }
 
     @ViewBuilder private var sidebarColumn: some View {
-      if contentRequested {
+      if sidebarContentActive {
         contentSidebar
       } else {
         plainSidebar
@@ -145,7 +178,7 @@
     }
 
     @ViewBuilder private var detailColumn: some View {
-      if contentRequested {
+      if detailContentActive {
         contentDetail
       } else {
         plainDetail
