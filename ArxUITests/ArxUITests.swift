@@ -523,6 +523,58 @@ final class ArxUITests: XCTestCase {
       artifactName: "minimal-connection-contents-audit-window.png")
   }
 
+  /// Delta 11a of the ladder: the two connection text fields alone, a
+  /// REDUCTION of the reproducing delta-10b contents cell (same inner
+  /// VStack(alignment: .leading, spacing: 10).padding(6) shape, same
+  /// no-scroll family wrapper, verbatim connectionFields pieces).
+  /// Plain sidebar, real labels, combo (probes+axgroup) base, unchanged
+  /// strict audit. Bounded readings, hypotheses only: if the mismatch
+  /// appears here, the two text fields alone suffice for reproduction
+  /// in this configuration (and the caption and buttons are not
+  /// necessary here); if it does not appear, the fields alone do not
+  /// reproduce it here and a single negative is not a causal
+  /// exclusion. Geometry is NOT held identical between cells; the
+  /// actual window frame is recorded per run and reported with the
+  /// result, not assumed. A single run does not establish recurrence.
+  /// Known and declared: the plain sidebar under the real label may
+  /// show the delta-5b duplicate-role coincidence; immaterial to the
+  /// per-element mismatch discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureConnectionFields() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-connection-fields", "--arx-minimal-real-labels", "--arx-minimal-probes",
+        "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-connection-fields-audit-window.png")
+  }
+
+  /// Delta 11b of the ladder: the connection caption and button row
+  /// alone, a REDUCTION of the reproducing delta-10b contents cell
+  /// (same inner shape, same no-scroll family wrapper, verbatim
+  /// connectionCaptionAndButtons pieces). Plain sidebar, real labels,
+  /// combo (probes+axgroup) base, unchanged strict audit. Bounded
+  /// readings, hypotheses only: if the mismatch appears here, the
+  /// caption and buttons alone suffice for reproduction in this
+  /// configuration (and the text fields are not necessary here); if it
+  /// does not appear, the caption and buttons alone do not reproduce
+  /// it here and a single negative is not a causal exclusion. Geometry
+  /// is NOT held identical between cells; the actual window frame is
+  /// recorded per run and reported with the result, not assumed. A
+  /// single run does not establish recurrence. Known and declared: the
+  /// plain sidebar under the real label may show the delta-5b
+  /// duplicate-role coincidence; immaterial to the per-element
+  /// mismatch discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureConnectionCaptionButtons() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-connection-caption-buttons", "--arx-minimal-real-labels",
+        "--arx-minimal-probes", "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-connection-caption-buttons-audit-window.png")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any

@@ -37,7 +37,11 @@
   /// content, a new composition) and --arx-minimal-connection-contents
   /// (the connection box's exact contents without the chrome, a
   /// verbatim reduction) split chrome versus contents inside the
-  /// reproducing connection box).
+  /// reproducing connection box; delta 11:
+  /// --arx-minimal-connection-fields and
+  /// --arx-minimal-connection-caption-buttons reduce the reproducing
+  /// contents cell to its verbatim fields versus caption-plus-buttons
+  /// pieces, same inner shape and family).
   /// Running the unchanged strict accessibility audit against each step
   /// separates findings caused by that component from findings the audit
   /// engine or CI environment produces on any app. Never compiled into
@@ -185,6 +189,24 @@
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-connection-contents")
     }
 
+    /// True only when a control test passes
+    /// --arx-minimal-connection-fields: the detail column renders only
+    /// the two connection text fields in the same inner shape and
+    /// no-scroll family wrapper. Reduction of the reproducing
+    /// delta-10b contents cell.
+    private var connectionFieldsRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-connection-fields")
+    }
+
+    /// True only when a control test passes
+    /// --arx-minimal-connection-caption-buttons: the detail column
+    /// renders only the connection caption and button row in the same
+    /// inner shape and no-scroll family wrapper. Reduction of the
+    /// reproducing delta-10b contents cell.
+    private var connectionCaptionButtonsRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-connection-caption-buttons")
+    }
+
     /// True only when a control test passes --arx-minimal-fixture-labels:
     /// forces the fixture label tokens even when content mode is on, so
     /// the content+fixture-labels cell of the 2x2 runs with the label
@@ -291,6 +313,10 @@
         connectionChromeDetail
       } else if connectionContentsRequested {
         connectionContentsDetail
+      } else if connectionFieldsRequested {
+        connectionFieldsDetail
+      } else if connectionCaptionButtonsRequested {
+        connectionCaptionButtonsDetail
       } else {
         plainDetail
       }
@@ -475,6 +501,42 @@
       .navigationTitle("Sharing")
     }
 
+    /// Delta 11a: the two connection text fields alone (the
+    /// --arx-minimal-connection-fields cell). REDUCTION of the
+    /// reproducing delta-10b contents cell: same inner
+    /// VStack(alignment: .leading, spacing: 10).padding(6) shape
+    /// reduced to the verbatim connectionFields pieces, same family
+    /// wrapper.
+    @ViewBuilder private var connectionFieldsDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 10) {
+          connectionFields
+        }
+        .padding(6)
+      }
+      .padding(24)
+      .frame(maxWidth: 760, alignment: .leading)
+      .navigationTitle("Sharing")
+    }
+
+    /// Delta 11b: the connection caption and button row alone (the
+    /// --arx-minimal-connection-caption-buttons cell). REDUCTION of the
+    /// reproducing delta-10b contents cell: same inner
+    /// VStack(alignment: .leading, spacing: 10).padding(6) shape
+    /// reduced to the verbatim connectionCaptionAndButtons pieces,
+    /// same family wrapper.
+    @ViewBuilder private var connectionCaptionButtonsDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 10) {
+          connectionCaptionAndButtons
+        }
+        .padding(6)
+      }
+      .padding(24)
+      .frame(maxWidth: 760, alignment: .leading)
+      .navigationTitle("Sharing")
+    }
+
     /// The full box content in a plain VStack WITHOUT the ScrollView
     /// wrapper (the --arx-minimal-detail-noscroll cell): identical box
     /// content to contentDetail, container structure removed. The
@@ -536,24 +598,40 @@
     /// The exact inner body of the connection group box, extracted
     /// verbatim in delta 10 so that the box and the
     /// --arx-minimal-connection-contents cell render the identical
-    /// contents. Any change here changes both cells together.
+    /// contents. Any change here changes both cells together. Delta 11
+    /// composes it from two verbatim named sub-builders so the fields
+    /// and the caption-plus-buttons cells render identical pieces.
     @ViewBuilder private var connectionBoxContent: some View {
       VStack(alignment: .leading, spacing: 10) {
-        TextField("Exact remote HTTPS origin", text: $origin)
-          .textContentType(.URL)
-        TextField("Local port", text: $port)
-        Text("Keep the Mac, Arx and your connector running.")
-          .font(.caption)
-          .foregroundStyle(.primary)
-        HStack {
-          Button("Start bridge") {}
-            .accessibilityIdentifier("bridge-start")
-          Button("Stop all sharing", role: .destructive) {}
-            .accessibilityIdentifier("bridge-stop")
-            .disabled(true)
-        }
+        connectionFields
+        connectionCaptionAndButtons
       }
       .padding(6)
+    }
+
+    /// The connection box's two text fields, extracted verbatim in
+    /// delta 11. Composed into connectionBoxContent and rendered alone
+    /// by the --arx-minimal-connection-fields cell.
+    @ViewBuilder private var connectionFields: some View {
+      TextField("Exact remote HTTPS origin", text: $origin)
+        .textContentType(.URL)
+      TextField("Local port", text: $port)
+    }
+
+    /// The connection box's caption and button row, extracted verbatim
+    /// in delta 11. Composed into connectionBoxContent and rendered
+    /// alone by the --arx-minimal-connection-caption-buttons cell.
+    @ViewBuilder private var connectionCaptionAndButtons: some View {
+      Text("Keep the Mac, Arx and your connector running.")
+        .font(.caption)
+        .foregroundStyle(.primary)
+      HStack {
+        Button("Start bridge") {}
+          .accessibilityIdentifier("bridge-start")
+        Button("Stop all sharing", role: .destructive) {}
+          .accessibilityIdentifier("bridge-stop")
+          .disabled(true)
+      }
     }
 
     /// The New client group box, verbatim from ContentView's fixture
