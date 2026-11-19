@@ -304,6 +304,59 @@ final class ArxUITests: XCTestCase {
       artifactName: "minimal-detail-content-audit-window.png")
   }
 
+  /// Delta 7a of the ladder: the detail CONTAINER structure with simple
+  /// text only. The sidebar stays plain; the detail column renders the
+  /// ScrollView holding just the "Arx bridge" title and the bridge
+  /// status text, no group boxes - isolating the container structure
+  /// from the box content. Real labels, combo (probes+axgroup) base, so
+  /// this cell differs from the reproducing detail-content cell by
+  /// exactly the box content. Bounded readings, hypotheses only: if the
+  /// mismatch appears here, the group boxes are not necessary for
+  /// reproduction in this configuration and the ScrollView-plus-text
+  /// shape suffices here; if it does not appear, the container alone
+  /// does not reproduce it here and a single negative is not a causal
+  /// exclusion. A single run does not establish recurrence. Known and
+  /// declared: the plain sidebar under the real label "Lists to share"
+  /// is the delta-5b cell shape and may show its duplicate-role
+  /// coincidence; immaterial to the per-element mismatch discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureDetailContainer() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-detail-container", "--arx-minimal-real-labels", "--arx-minimal-probes",
+        "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-detail-container-audit-window.png")
+  }
+
+  /// Delta 7b of the ladder: the detail BOX CONTENT without the
+  /// container. The sidebar stays plain; the detail column renders the
+  /// full detail content (title, status, all three group boxes, revoke
+  /// caption) in a plain VStack WITHOUT the ScrollView wrapper -
+  /// isolating the box content from the container structure. Real
+  /// labels, combo (probes+axgroup) base, so this cell differs from the
+  /// reproducing detail-content cell by exactly the ScrollView.
+  /// Bounded readings, hypotheses only: if the mismatch appears here,
+  /// the ScrollView container is not necessary for reproduction in this
+  /// configuration; if it does not appear, the box content without the
+  /// ScrollView does not reproduce it here and a single negative is not
+  /// a causal exclusion. A single run does not establish recurrence.
+  /// Declared caveat: without the ScrollView the long content may clip
+  /// or overflow the window; that geometry difference is part of this
+  /// cell, and no claim is made that the accessibility tree is
+  /// unaffected by it. Known and declared: the plain sidebar under the
+  /// real label may show the delta-5b duplicate-role coincidence;
+  /// immaterial to the per-element mismatch discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureDetailNoScroll() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-detail-noscroll", "--arx-minimal-real-labels", "--arx-minimal-probes",
+        "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-detail-noscroll-audit-window.png")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any
