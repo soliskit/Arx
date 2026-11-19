@@ -355,12 +355,12 @@ final class ArxUITests: XCTestCase {
       let attachment = XCTAttachment(screenshot: screenshot)
       attachment.name = "contrast-probe-\(probe.token)"
       attachment.lifetime = .keepAlways
-      XCTContext.currentActivity?.add(attachment)
+      add(attachment)
     }
     let windowAttachment = XCTAttachment(screenshot: application.windows["main"].screenshot())
     windowAttachment.name = "contrast-probe-window"
     windowAttachment.lifetime = .keepAlways
-    XCTContext.currentActivity?.add(windowAttachment)
+    add(windowAttachment)
   }
 
   private func columnContainerFindings(_ application: XCUIApplication) -> [String] {
