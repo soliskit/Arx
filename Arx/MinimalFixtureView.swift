@@ -6,6 +6,7 @@
 //
 
 #if DEBUG
+  import AppKit
   import SwiftUI
 
   /// A NavigationSplitView control fixture for the strict audit's
@@ -53,7 +54,11 @@
   /// new-client inner shape, a verbatim reduction of the new-client
   /// box cell, and --arx-minimal-new-client-read-toggle renders the
   /// existing Read selected lists Toggle alone in the same new-client
-  /// inner shape, a second verbatim reduction of that box cell).
+  /// inner shape, a second verbatim reduction of that box cell;
+  /// delta 14: --arx-minimal-connection-origin-field-unfocused
+  /// renders the verbatim origin-field cell while displacing the
+  /// window's first responder to nil, a same-control contrast on
+  /// keyboard focus against the origin-field cell).
   /// Running the unchanged strict accessibility audit against each step
   /// separates findings caused by that component from findings the audit
   /// engine or CI environment produces on any app. Never compiled into
@@ -266,6 +271,19 @@
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-new-client-read-toggle")
     }
 
+    /// True only when a control test passes
+    /// --arx-minimal-connection-origin-field-unfocused: the detail
+    /// column renders the verbatim delta-12a origin-field cell while
+    /// the window's first responder is displaced to nil, so the only
+    /// intended difference from the origin-field cell at audit time is
+    /// the field's Keyboard Focused attribute. The displacement is
+    /// verified per run by the additive focus print, the window render
+    /// and the tree comparison; without that evidence the cell is
+    /// invalid, not negative.
+    private var connectionOriginFieldUnfocusedRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-connection-origin-field-unfocused")
+    }
+
     /// True only when a control test passes --arx-minimal-fixture-labels:
     /// forces the fixture label tokens even when content mode is on, so
     /// the content+fixture-labels cell of the 2x2 runs with the label
@@ -386,6 +404,8 @@
         newClientLabelFieldDetail
       } else if newClientReadToggleRequested {
         newClientReadToggleDetail
+      } else if connectionOriginFieldUnfocusedRequested {
+        connectionOriginFieldUnfocusedDetail
       } else {
         plainDetail
       }
@@ -694,6 +714,28 @@
       .padding(24)
       .frame(maxWidth: 760, alignment: .leading)
       .navigationTitle("Sharing")
+    }
+
+    /// Delta 14a: the verbatim delta-12a origin-field cell with
+    /// keyboard focus displaced off the field (the
+    /// --arx-minimal-connection-origin-field-unfocused cell). The
+    /// content is exactly connectionOriginFieldDetail; the only added
+    /// behavior is the DEBUG-only first-responder displacement below.
+    /// SwiftUI assigns initial focus to the lone field when the window
+    /// appears, so the displacement is issued immediately and twice
+    /// more on short delays; the additive focus print, the window
+    /// render and the tree comparison establish per run whether the
+    /// field was unfocused at audit time. onAppear adds no element to
+    /// the view tree.
+    @ViewBuilder private var connectionOriginFieldUnfocusedDetail: some View {
+      connectionOriginFieldDetail
+        .onAppear {
+          for delay in [0.0, 0.5, 1.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+              NSApplication.shared.keyWindow?.makeFirstResponder(nil)
+            }
+          }
+        }
     }
 
     /// The full box content in a plain VStack WITHOUT the ScrollView

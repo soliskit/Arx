@@ -709,6 +709,37 @@ final class ArxUITests: XCTestCase {
       artifactName: "minimal-new-client-read-toggle-audit-window.png")
   }
 
+  /// Delta 14a of the ladder: the verbatim delta-12a origin-field cell
+  /// with keyboard focus displaced off the field (DEBUG-only
+  /// first-responder displacement to nil; onAppear adds no element).
+  /// Same content, shape, wrapper, base and unchanged strict audit as
+  /// the origin-field cell, same run. Validity gate: the additive
+  /// focus print, the window render and the tree comparison must show
+  /// the field NOT Keyboard Focused at audit time, with every other
+  /// tree difference versus the origin-field cell itemized as a
+  /// residual; without that evidence this cell is INVALID and takes
+  /// no reading. Bounded readings, hypotheses only: if the mismatch
+  /// appears in a valid unfocused cell, the origin field without
+  /// keyboard focus also suffices in this configuration and focus is
+  /// not necessary here; if it does not appear in a valid unfocused
+  /// cell, focus on the field is implicated in this configuration
+  /// only - a single controlled pair, not a mechanism and not an
+  /// exclusion. Geometry is NOT held identical between cells; the
+  /// actual window frame is recorded per run and reported, not
+  /// assumed. A single run does not establish recurrence. Known and
+  /// declared: the plain sidebar under the real label may show the
+  /// delta-5b duplicate-role coincidence; immaterial to the
+  /// per-element mismatch discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureConnectionOriginFieldUnfocused() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-connection-origin-field-unfocused", "--arx-minimal-real-labels",
+        "--arx-minimal-probes", "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-connection-origin-field-unfocused-audit-window.png")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any
@@ -730,6 +761,13 @@ final class ArxUITests: XCTestCase {
     // cell, because the no-scroll family demonstrated that geometry
     // varies with content. Observation only, never an assertion.
     print("pre-audit-window-frame: \(application.windows["main"].frame)")
+    // Additive observation (delta 14): record keyboard focus on text
+    // fields at audit time, because the single-field cells
+    // demonstrated that the lone field takes focus. Observation only,
+    // never an assertion.
+    let textFields = application.textFields.allElementsBoundByIndex
+    let focusedTextFields = textFields.filter { $0.hasFocus }
+    print("pre-audit-focused-text-fields: \(focusedTextFields.count) of \(textFields.count)")
     let auditPNG = application.screenshot().pngRepresentation
     let artifacts = URL(fileURLWithPath: "/tmp/uitest-artifacts")
     try? FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
