@@ -169,6 +169,36 @@ final class ArxUITests: XCTestCase {
       artifactName: "minimal-probes-axgroup-audit-window.png")
   }
 
+  /// Delta 4 of the ladder: the combo configuration (probes + column
+  /// grouping) PLUS the full app's fixture-mode content shape, replicated
+  /// faithfully from ContentView.swift into the minimal fixture behind
+  /// --arx-minimal-content (banner capsule, grant-list rows with their
+  /// real labels and list-grant-* identifiers, Refresh button, bridge
+  /// status text, and the Connection/New client/Clients group boxes).
+  /// The combo run did not reproduce the Parent/Child mismatch; this run
+  /// tests whether the content shape does. If the mismatch appears here
+  /// but not in the combo run, this content shape is implicated in this
+  /// environment; if it does not appear, content does not reproduce it
+  /// here and the remaining differences (inert onChange presence,
+  /// environment variance) stay open, with the reverse ladder as the
+  /// following step. Multi-element attribution is acknowledged: this is
+  /// ONE coherent content delta, not a claim about any single element;
+  /// if it reproduces the mismatch, bisecting within the content set is
+  /// its own reviewed step. Label fidelity declared, not hidden: content
+  /// mode uses the full app's real column titles and accessibility labels
+  /// ("Lists to share", "Sharing"), so the delta-2 "Fixture lists"
+  /// duplicate-role fixture infidelity is not expected in this run; that
+  /// fidelity repair rides inside this delta explicitly.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureContent() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-content", "--arx-minimal-probes", "--arx-minimal-axgroup",
+        "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-content-audit-window.png")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any

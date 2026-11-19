@@ -8,18 +8,21 @@
 #if DEBUG
   import SwiftUI
 
-  /// A plain NavigationSplitView with a navigation title and default-styled
-  /// text, rendered only when a fixture UI test passes
+  /// A NavigationSplitView control fixture for the strict audit's
+  /// unresolved findings, rendered only when a fixture UI test passes
   /// --arx-minimal-fixture. It is the control half of a single-variable
-  /// ladder for the strict audit's unresolved findings: the baseline run
-  /// adds nothing Arx-specific, and each ladder step adds exactly one
-  /// component from the full app behind its own launch argument (delta 1:
-  /// --arx-minimal-probes installs the full app's two column accessibility
-  /// probes, the only components there that mutate the AX tree). Running
-  /// the unchanged strict accessibility audit against each step separates
-  /// findings caused by that component from findings the audit engine or CI
-  /// environment produces on any app. Never compiled into Release and never
-  /// reachable through the production UI.
+  /// ladder: the baseline run adds nothing Arx-specific, and each ladder
+  /// step adds exactly one component from the full app behind its own
+  /// launch argument (delta 1: --arx-minimal-probes installs the two
+  /// column accessibility probes; delta 2: --arx-minimal-axgroup applies
+  /// the two column accessibilityElement(children: .contain) +
+  /// accessibilityLabel pairs; delta 4: --arx-minimal-content replaces
+  /// the plain placeholder content with a faithful replica of the full
+  /// app's fixture-mode content shape, taken from ContentView.swift).
+  /// Running the unchanged strict accessibility audit against each step
+  /// separates findings caused by that component from findings the audit
+  /// engine or CI environment produces on any app. Never compiled into
+  /// Release and never reachable through the production UI.
   struct MinimalFixtureView: View {
     /// True only when a control test passes --arx-minimal-probes: the
     /// single-delta switch that installs the full app's two column
@@ -39,28 +42,211 @@
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-axgroup")
     }
 
+    /// True only when a control test passes --arx-minimal-content: the
+    /// single-delta switch that swaps the plain placeholder content for
+    /// the full app's fixture-mode content shape. In content mode the
+    /// column titles and accessibility labels are the full app's real
+    /// strings ("Lists to share", "Sharing"), not the fixture tokens -
+    /// an explicit fidelity choice, so the delta-2 "Fixture lists"
+    /// duplicate-role finding is not expected in content-mode runs.
+    private var contentRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-content")
+    }
+
+    @State private var highlighted: String?
+    @State private var grantedLists: Set<String> = []
+    @State private var origin = ""
+    @State private var port = "8765"
+    @State private var clientLabel = "Browser client"
+    @State private var rightsRead = false
+    @State private var rightsManage = false
+    @State private var rightsDelete = false
+
+    /// The fixture store's four collections, mirrored from
+    /// BridgeCore/FixtureStore.swift so the content replica's rows match
+    /// the full app's fixture rows exactly.
+    private struct FixtureList: Identifiable {
+      let id: String
+      let title: String
+      let source: String
+      let writable: Bool
+    }
+
+    private static let fixtureLists = [
+      FixtureList(id: "inbox", title: "Inbox", source: "Fixture account", writable: true),
+      FixtureList(id: "weekend", title: "Weekend", source: "Fixture account", writable: true),
+      FixtureList(id: "later", title: "Later", source: "Fixture account", writable: true),
+      FixtureList(id: "readonly", title: "Read-only list", source: "", writable: false),
+    ]
+
     var body: some View {
       NavigationSplitView {
-        List {
-          Text("Fixture row one")
-          Text("Fixture row two")
-        }
-        .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
-        .modifier(ColumnAXGroup(label: "Fixture lists", enabled: axGroupRequested))
-        .background(sidebarProbe)
+        sidebarColumn
+          .modifier(
+            ColumnAXGroup(
+              label: contentRequested
+                ? "Lists to share" : "Fixture lists",
+              enabled: axGroupRequested)
+          )
+          .background(sidebarProbe)
       } detail: {
+        detailColumn
+          .modifier(
+            ColumnAXGroup(
+              label: contentRequested
+                ? "Sharing" : "Fixture Sharing",
+              enabled: axGroupRequested)
+          )
+          .background(detailProbe)
+      }
+    }
+
+    @ViewBuilder private var sidebarColumn: some View {
+      if contentRequested {
+        contentSidebar
+      } else {
+        plainSidebar
+      }
+    }
+
+    @ViewBuilder private var detailColumn: some View {
+      if contentRequested {
+        contentDetail
+      } else {
+        plainDetail
+      }
+    }
+
+    /// The plain control content: two rows, three default-styled texts,
+    /// nothing Arx-specific.
+    private var plainSidebar: some View {
+      List {
+        Text("Fixture row one")
+        Text("Fixture row two")
+      }
+      .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
+    }
+
+    private var plainDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        Text("Fixture detail title")
+          .font(.largeTitle)
+        Text("Fixture plain status text")
+        Text("Fixture small caption text")
+          .font(.caption)
+      }
+      .padding(24)
+      .navigationTitle("Fixture Sharing")
+    }
+
+    /// Faithful replica of the full app's fixture-mode sidebar
+    /// (ContentView.swift:17-54, connected fixture path): the banner
+    /// capsule, the grant-list rows with their labels and identifiers,
+    /// and the Refresh button. All state is local and static during the
+    /// audit; no model, store or notification is involved.
+    @ViewBuilder private var contentSidebar: some View {
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Fixture data - no real Reminders access")
+          .font(.caption)
+          .foregroundStyle(Color(nsColor: .labelColor))
+          .padding(.horizontal, 6)
+          .padding(.vertical, 2)
+          .background(.background, in: .capsule)
+        List(Self.fixtureLists, selection: $highlighted) { list in
+          Toggle(
+            isOn: Binding(
+              get: { grantedLists.contains(list.id) },
+              set: { enabled in
+                if enabled {
+                  grantedLists.insert(list.id)
+                } else {
+                  grantedLists.remove(list.id)
+                }
+              })
+          ) {
+            VStack(alignment: .leading) {
+              Text(list.title)
+              Text(list.source + (list.writable ? "" : " · Read-only"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+          .accessibilityLabel(list.title)
+          .accessibilityIdentifier("list-grant-" + list.id)
+          .tag(list.id)
+        }
+        Button("Refresh lists") {}
+      }
+      .padding()
+      .navigationTitle("Lists to share")
+      .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
+    }
+
+    /// Faithful replica of the full app's fixture-mode detail column
+    /// (ContentView.swift:60-135): the bridge title and status text, and
+    /// the three group boxes with their controls, with the same disabled
+    /// states the fixture model produces (connected, never running).
+    @ViewBuilder private var contentDetail: some View {
+      ScrollView {
         VStack(alignment: .leading, spacing: 20) {
-          Text("Fixture detail title")
+          Text("Arx bridge")
             .font(.largeTitle)
-          Text("Fixture plain status text")
-          Text("Fixture small caption text")
+          Text("Choose lists and actions for a new client. Highlighting a list does not share it.")
+            .foregroundStyle(Color(nsColor: .labelColor))
+            .accessibilityIdentifier("bridge-status")
+          GroupBox("Connection") {
+            VStack(alignment: .leading, spacing: 10) {
+              TextField("Exact remote HTTPS origin", text: $origin)
+                .textContentType(.URL)
+              TextField("Local port", text: $port)
+              Text("Keep the Mac, Arx and your connector running.")
+                .font(.caption)
+                .foregroundStyle(.primary)
+              HStack {
+                Button("Start bridge") {}
+                  .accessibilityIdentifier("bridge-start")
+                Button("Stop all sharing", role: .destructive) {}
+                  .accessibilityIdentifier("bridge-stop")
+                  .disabled(true)
+              }
+            }
+            .padding(6)
+          }
+          GroupBox("New client") {
+            VStack(alignment: .leading, spacing: 10) {
+              TextField("Client label", text: $clientLabel)
+              Toggle("Read selected lists", isOn: $rightsRead)
+              Toggle("Create, edit, move, complete and reopen", isOn: $rightsManage)
+                .disabled(!rightsRead)
+              Toggle("Delete reminders with confirmation", isOn: $rightsDelete)
+                .disabled(!rightsRead)
+              Text(
+                "Select this new client's access. To change an existing client, revoke and pair again."
+              )
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              Button("Create single-use pairing secret") {}
+                .disabled(true)
+            }
+            .padding(6)
+          }
+          GroupBox("Clients") {
+            VStack(alignment: .leading, spacing: 8) {
+              Button("Refresh client status") {}
+              Text("No client has access.")
+                .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(6)
+          }
+          Text("Revoke stops new requests. Data already viewed and changes already saved remain.")
             .font(.caption)
+            .foregroundStyle(.secondary)
         }
         .padding(24)
-        .navigationTitle("Fixture Sharing")
-        .modifier(ColumnAXGroup(label: "Fixture Sharing", enabled: axGroupRequested))
-        .background(detailProbe)
+        .frame(maxWidth: 760, alignment: .leading)
       }
+      .navigationTitle("Sharing")
     }
 
     /// The full app's sidebar column probe when --arx-minimal-probes is
@@ -87,9 +273,7 @@
     /// accessibilityElement(children: .contain) plus accessibilityLabel,
     /// the only accessibilityElement(children:) calls in the app source -
     /// only when the --arx-minimal-axgroup switch is on; otherwise the
-    /// content passes through untouched. Label text mirrors the full app's
-    /// rule of matching the column's title ("Fixture Sharing" matches this
-    /// fixture's detail navigation title).
+    /// content passes through untouched.
     private struct ColumnAXGroup: ViewModifier {
       let label: String
       let enabled: Bool
