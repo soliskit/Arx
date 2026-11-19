@@ -125,6 +125,26 @@ final class ArxUITests: XCTestCase {
       artifactName: "minimal-probes-audit-window.png")
   }
 
+  /// Delta 2 of the single-variable ladder: the SAME minimal fixture with
+  /// exactly one component from the full app added - its two column
+  /// accessibilityElement(children: .contain) + accessibilityLabel
+  /// modifier pairs, the only accessibilityElement(children:) calls in
+  /// the app source (ContentView:56 and :137) and the only modifiers
+  /// there that restructure AX containment rather than set attributes.
+  /// Isolated against the baseline: no probes and no dump argument, so
+  /// nothing else that touches the AX tree is active. If the Parent/Child
+  /// mismatch appears here but not in the baseline, the containment
+  /// grouping is implicated in this environment; if it does not appear,
+  /// the grouping alone does not reproduce it here and interactions
+  /// unique to the full app remain open. Every other condition is
+  /// identical to the baseline control.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureAXGroup() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: ["--arx-minimal-axgroup"],
+      artifactName: "minimal-axgroup-audit-window.png")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any

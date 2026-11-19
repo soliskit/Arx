@@ -28,6 +28,17 @@
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-probes")
     }
 
+    /// True only when a control test passes --arx-minimal-axgroup: the
+    /// single-delta switch that adds the full app's two column
+    /// accessibilityElement(children: .contain) + accessibilityLabel
+    /// modifier pairs. Those are the only accessibilityElement(children:)
+    /// calls in the app source (ContentView:56 and :137); every other
+    /// accessibility modifier there sets an attribute (label, identifier)
+    /// without restructuring containment.
+    private var axGroupRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-axgroup")
+    }
+
     var body: some View {
       NavigationSplitView {
         List {
@@ -35,6 +46,7 @@
           Text("Fixture row two")
         }
         .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
+        .modifier(ColumnAXGroup(label: "Fixture lists", enabled: axGroupRequested))
         .background(sidebarProbe)
       } detail: {
         VStack(alignment: .leading, spacing: 20) {
@@ -46,6 +58,7 @@
         }
         .padding(24)
         .navigationTitle("Fixture Sharing")
+        .modifier(ColumnAXGroup(label: "Fixture Sharing", enabled: axGroupRequested))
         .background(detailProbe)
       }
     }
@@ -67,6 +80,28 @@
     @ViewBuilder private var detailProbe: some View {
       if probesRequested {
         ColumnAccessibilityProbe(column: .detail)
+      }
+    }
+
+    /// Applies the full app's column modifier pair -
+    /// accessibilityElement(children: .contain) plus accessibilityLabel,
+    /// the only accessibilityElement(children:) calls in the app source -
+    /// only when the --arx-minimal-axgroup switch is on; otherwise the
+    /// content passes through untouched. Label text mirrors the full app's
+    /// rule of matching the column's title ("Fixture Sharing" matches this
+    /// fixture's detail navigation title).
+    private struct ColumnAXGroup: ViewModifier {
+      let label: String
+      let enabled: Bool
+
+      @ViewBuilder func body(content: Content) -> some View {
+        if enabled {
+          content
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(label)
+        } else {
+          content
+        }
       }
     }
   }
