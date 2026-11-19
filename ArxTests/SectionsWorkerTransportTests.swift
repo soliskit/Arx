@@ -87,7 +87,7 @@ struct SectionsWorkerTransportTests {
     }
   }
 
-  @Test func unlistedExitStatusIsUnavailable() async throws {
+  @Test func unlistedExitStatusNamesTheCode() async throws {
     let artifacts = TempArtifacts()
     defer { artifacts.removeAll() }
     let child = try makeChild(
@@ -98,7 +98,36 @@ struct SectionsWorkerTransportTests {
       """, into: artifacts)
     let reply = await call(child, action: "read", fields: Self.readFields)
     #expect(reply.state == "unknown")
-    #expect(reply.reason == "worker_unavailable")
+    #expect(reply.reason == "child_exit_1")
+  }
+
+  @Test func workerExitStatusesAreNamed() async throws {
+    let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
+    for status in [64, 70, 74] {
+      let child = try makeChild(
+        """
+        cat > /dev/null
+        exit \(status)
+        """, into: artifacts)
+      let reply = await call(child)
+      #expect(reply.state == "unknown")
+      #expect(reply.reason == "child_exit_\(status)")
+    }
+  }
+
+  @Test func labelsTooLargeRefusalPassesThrough() async throws {
+    let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
+    let child = try makeChild(
+      """
+      cat > /dev/null
+      printf '%s' '{"state":"unknown","reason":"labels_too_large"}'
+      exit 77
+      """, into: artifacts)
+    let reply = await call(child)
+    #expect(reply.state == "unknown")
+    #expect(reply.reason == "labels_too_large")
   }
 
   @Test func workerDeadlineExitIsReportedAsTimeout() async throws {
@@ -114,7 +143,7 @@ struct SectionsWorkerTransportTests {
     #expect(reply.reason == "timeout")
   }
 
-  @Test func signalDeathIsUnavailableNotTimeout() async throws {
+  @Test func signalDeathNamesTheSignalNotTimeout() async throws {
     let artifacts = TempArtifacts()
     defer { artifacts.removeAll() }
     let child = try makeChild(
@@ -124,10 +153,10 @@ struct SectionsWorkerTransportTests {
       """, into: artifacts)
     let reply = await call(child)
     #expect(reply.state == "unknown")
-    #expect(reply.reason == "worker_unavailable")
+    #expect(reply.reason == "child_signaled_9")
   }
 
-  @Test func malformedOutputIsUnavailable() async throws {
+  @Test func malformedOutputIsUndecodable() async throws {
     let artifacts = TempArtifacts()
     defer { artifacts.removeAll() }
     let child = try makeChild(
@@ -138,7 +167,7 @@ struct SectionsWorkerTransportTests {
       """, into: artifacts)
     let reply = await call(child)
     #expect(reply.state == "unknown")
-    #expect(reply.reason == "worker_unavailable")
+    #expect(reply.reason == "output_undecodable")
   }
 
   @Test func oversizedOutputIsUnavailableWithoutReachingTheDeadline() async throws {
@@ -156,7 +185,7 @@ struct SectionsWorkerTransportTests {
     // The parent drains while the child runs, so a full pipe never stalls the
     // writer into the deadline; oversize is classified from the byte count.
     #expect(reply.state == "unknown")
-    #expect(reply.reason == "worker_unavailable")
+    #expect(reply.reason == "output_too_large")
     #expect(elapsed < 8)
   }
 
@@ -175,12 +204,12 @@ struct SectionsWorkerTransportTests {
     #expect(reply.reason == String(repeating: "x", count: 15000))
   }
 
-  @Test func nonexistentExecutableIsUnavailable() async throws {
+  @Test func nonexistentExecutableIsSpawnFailed() async throws {
     let missing = FileManager.default.temporaryDirectory
       .appendingPathComponent("sections-transport-missing-" + UUID().uuidString)
     let reply = await call(missing)
     #expect(reply.state == "unknown")
-    #expect(reply.reason == "worker_unavailable")
+    #expect(reply.reason == "spawn_failed")
   }
 
   @Test func childClosingStdinEarlyIsUnavailable() async throws {
@@ -190,10 +219,11 @@ struct SectionsWorkerTransportTests {
       """
       exit 0
       """, into: artifacts)
-    // Whether the input write lands first or meets EPIPE, the exchange refuses.
+    // Whether the input write lands first or meets EPIPE, the exchange refuses
+    // and names the leg it actually saw.
     let reply = await call(child)
     #expect(reply.state == "unknown")
-    #expect(reply.reason == "worker_unavailable")
+    #expect(["write_failed", "output_undecodable"].contains(reply.reason))
   }
 
   @Test func descendantHoldingStdoutEndsAtTheDeadline() async throws {
@@ -263,8 +293,35 @@ struct SectionsWorkerTransportTests {
     let launches = try String(contentsOf: countFile, encoding: .utf8)
       .split(separator: "\n").count
     #expect(reply.state == "unknown")
-    #expect(reply.reason == "worker_unavailable")
+    #expect(reply.reason == "child_exit_1")
     #expect(launches == 1)
+  }
+
+  @MainActor @Test func fixedReasonPhrasesCoverTheNewTokens() {
+    #expect(
+      SectionsExperimentModel.diagnosticReason("labels_too_large")
+        == "label names too large; read unknown")
+    #expect(
+      SectionsExperimentModel.diagnosticReason("child_exit_70")
+        == "worker exited, code 70; read unknown")
+    #expect(
+      SectionsExperimentModel.diagnosticReason("child_signaled_6")
+        == "worker stopped by signal 6; read unknown")
+    #expect(
+      SectionsExperimentModel.diagnosticReason("child_exit_abc")
+        == "unrecognized result; read unknown")
+    #expect(
+      SectionsExperimentModel.diagnosticReason("child_signaled_")
+        == "unrecognized result; read unknown")
+    #expect(
+      SectionsExperimentModel.diagnosticReason("output_too_large")
+        == "reply too large; read unknown")
+    #expect(
+      SectionsExperimentModel.diagnosticReason("spawn_failed")
+        == "worker launch failed; read unknown")
+    #expect(
+      SectionsExperimentModel.diagnosticReason("worker_unavailable")
+        == "worker result unavailable; read unknown")
   }
 
   @Test func sameAppFixtureWorkerRefusesBeforeAnyProvider() async throws {

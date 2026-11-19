@@ -13,8 +13,16 @@ static BOOL text(id value) {
 }
 static int output(NSDictionary *result, int status) {
     NSData *data = [NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingSortedKeys error:NULL];
+    if (!data) return 70;
     // Labels are local selection data only. Section-read output is fixed and tiny.
-    if (!data || data.length > ([result[@"state"] isEqual:@"labels"] ? 16384u : 2048u)) return 70;
+    if (data.length > ([result[@"state"] isEqual:@"labels"] ? 16384u : 2048u)) {
+        // A labels payload over the bound used to die here as a bare exit 70,
+        // which the parent could only report as worker result unavailable.
+        // Emit the fixed refusal instead so the stop names itself.
+        if ([result[@"state"] isEqual:@"labels"])
+            return output(@{ @"state": @"unknown", @"reason": @"labels_too_large" }, 77);
+        return 70;
+    }
     const unsigned char *p = data.bytes;
     size_t remaining = data.length;
     while (remaining) {

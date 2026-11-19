@@ -202,7 +202,18 @@ nonisolated struct SectionsReply: Codable, Sendable {
 
   // Closed vocabulary at the final display/copy boundary. Never echo worker text.
   static func diagnosticReason(_ reason: String) -> String {
-    switch reason {
+    // Numbered child fates are fixed tokens too: ASCII digits only, and the
+    // number is all that ever crosses this boundary.
+    for (prefix, phrase) in [
+      ("child_signaled_", "worker stopped by signal "), ("child_exit_", "worker exited, code "),
+    ] where reason.hasPrefix(prefix) {
+      let digits = reason.dropFirst(prefix.count)
+      guard !digits.isEmpty, digits.allSatisfy({ $0 >= "0" && $0 <= "9" }) else {
+        return "unrecognized result; read unknown"
+      }
+      return phrase + digits + "; read unknown"
+    }
+    return switch reason {
     case "existing_permission_unavailable": "existing permission unavailable"
     case "label_bound_exceeded": "label limit exceeded"
     case "labels_unverified": "labels unverified"
@@ -218,6 +229,15 @@ nonisolated struct SectionsReply: Codable, Sendable {
     case "denied": "scope refused"
     case "timeout": "worker timed out; read unknown"
     case "worker_unavailable": "worker result unavailable; read unknown"
+    case "spawn_unavailable": "worker launch unavailable; read unknown"
+    case "input_unavailable": "worker input unavailable; read unknown"
+    case "spawn_failed": "worker launch failed; read unknown"
+    case "pipe_setup_failed": "worker channel setup failed; read unknown"
+    case "write_failed": "worker write failed; read unknown"
+    case "read_failed": "worker read failed; read unknown"
+    case "output_too_large": "reply too large; read unknown"
+    case "output_undecodable": "reply not readable; read unknown"
+    case "labels_too_large": "label names too large; read unknown"
     case "exact_object_candidate": "candidate section matched"
     case "fixture": "synthetic fixture"
     default: "unrecognized result; read unknown"
@@ -263,8 +283,9 @@ nonisolated struct SectionsReply: Codable, Sendable {
 // It has no GUI, listener or permission request. Missing inherited access refuses.
 enum SectionsWorkerTransport {
   nonisolated static func call(action: String, fields: [String: String]) -> SectionsReply {
-    let refused = SectionsReply(state: "unknown", reason: "worker_unavailable")
-    guard let executable = Bundle.main.executableURL else { return refused }
+    guard let executable = Bundle.main.executableURL else {
+      return SectionsReply(state: "unknown", reason: "spawn_unavailable")
+    }
     return call(
       executable: executable, arguments: ["--sections-local-worker"], action: action, fields: fields
     )
@@ -275,10 +296,11 @@ enum SectionsWorkerTransport {
   nonisolated static func call(
     executable: URL, arguments: [String], action: String, fields: [String: String]
   ) -> SectionsReply {
-    let refused = SectionsReply(state: "unknown", reason: "worker_unavailable")
     var input = fields
     input["action"] = action
-    guard let bytes = try? JSONEncoder().encode(input), bytes.count <= 4096 else { return refused }
+    guard let bytes = try? JSONEncoder().encode(input), bytes.count <= 4096 else {
+      return SectionsReply(state: "unknown", reason: "input_unavailable")
+    }
     let process = Process()
     process.executableURL = executable
     process.arguments = arguments
@@ -312,7 +334,7 @@ enum SectionsWorkerTransport {
       try process.run()
     } catch {
       // A missing or unexecutable child refuses without any waiting.
-      return refused
+      return SectionsReply(state: "unknown", reason: "spawn_failed")
     }
     // Both pipe ends must be nonblocking so no child behavior can stall the
     // parent past the deadline; failing to set that refuses the exchange closed.
@@ -325,7 +347,7 @@ enum SectionsWorkerTransport {
     guard makeNonblocking(descriptor), makeNonblocking(writeDescriptor) else {
       kill(process.processIdentifier, SIGKILL)
       process.waitUntilExit()
-      return refused
+      return SectionsReply(state: "unknown", reason: "pipe_setup_failed")
     }
     // The input write shares the deadline: a child that never reads cannot stall
     // the parent, and a fast refusal closing stdin fails the write with EPIPE.
@@ -388,7 +410,7 @@ enum SectionsWorkerTransport {
         kill(process.processIdentifier, SIGKILL)
         process.waitUntilExit()
       }
-      return refused
+      return SectionsReply(state: "unknown", reason: "read_failed")
     }
     if process.isRunning {
       kill(process.processIdentifier, SIGKILL)
@@ -403,11 +425,19 @@ enum SectionsWorkerTransport {
     if process.terminationReason == .exit && process.terminationStatus == 124 {
       return SectionsReply(state: "unknown", reason: "timeout")
     }
-    guard writeComplete, total <= 16384,
-      let result = try? JSONDecoder().decode(SectionsReply.self, from: output),
-      process.terminationReason == .exit,
-      [0, 69, 77].contains(process.terminationStatus)
-    else { return refused }
+    // Each transport leg names its own fixed stop reason; none of these tokens
+    // carries worker output, only the failed leg and a tiny status number.
+    guard writeComplete else { return SectionsReply(state: "unknown", reason: "write_failed") }
+    guard total <= 16384 else { return SectionsReply(state: "unknown", reason: "output_too_large") }
+    guard process.terminationReason == .exit else {
+      return SectionsReply(state: "unknown", reason: "child_signaled_\(process.terminationStatus)")
+    }
+    guard [0, 69, 77].contains(process.terminationStatus) else {
+      return SectionsReply(state: "unknown", reason: "child_exit_\(process.terminationStatus)")
+    }
+    guard let result = try? JSONDecoder().decode(SectionsReply.self, from: output) else {
+      return SectionsReply(state: "unknown", reason: "output_undecodable")
+    }
     return result
   }
 }
