@@ -26,7 +26,10 @@
   /// bisect the content variable by column, with --arx-minimal-content
   /// kept as their union; delta 7: --arx-minimal-detail-container and
   /// --arx-minimal-detail-noscroll bisect the detail content into
-  /// container structure versus box content).
+  /// container structure versus box content; delta 8:
+  /// --arx-minimal-detail-boxes and --arx-minimal-detail-texts split
+  /// the box content into group boxes versus texts, same no-scroll
+  /// family).
   /// Running the unchanged strict accessibility audit against each step
   /// separates findings caused by that component from findings the audit
   /// engine or CI environment produces on any app. Never compiled into
@@ -111,6 +114,23 @@
     /// difference is part of this cell, not a hidden change.
     private var detailNoScrollRequested: Bool {
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-detail-noscroll")
+    }
+
+    /// True only when a control test passes --arx-minimal-detail-boxes:
+    /// the detail column renders only the three group boxes of the box
+    /// content in the same no-scroll VStack family. Isolates the boxes
+    /// from the texts. Mutually exclusive with the other content
+    /// switches; no existing configuration changes.
+    private var detailBoxesRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-detail-boxes")
+    }
+
+    /// True only when a control test passes --arx-minimal-detail-texts:
+    /// the detail column renders only the title, status and revoke
+    /// caption texts in the same no-scroll VStack family. Isolates the
+    /// texts from the boxes.
+    private var detailTextsRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-detail-texts")
     }
 
     /// True only when a control test passes --arx-minimal-fixture-labels:
@@ -205,6 +225,10 @@
         containerDetail
       } else if detailNoScrollRequested {
         noScrollDetail
+      } else if detailBoxesRequested {
+        boxesDetail
+      } else if detailTextsRequested {
+        textsDetail
       } else {
         plainDetail
       }
@@ -286,15 +310,40 @@
     @ViewBuilder private var containerDetail: some View {
       ScrollView {
         VStack(alignment: .leading, spacing: 20) {
-          Text("Arx bridge")
-            .font(.largeTitle)
-          Text("Choose lists and actions for a new client. Highlighting a list does not share it.")
-            .foregroundStyle(Color(nsColor: .labelColor))
-            .accessibilityIdentifier("bridge-status")
+          bridgeTitle
+          bridgeStatus
         }
         .padding(24)
         .frame(maxWidth: 760, alignment: .leading)
       }
+      .navigationTitle("Sharing")
+    }
+
+    /// The three group boxes alone in the no-scroll VStack family (the
+    /// --arx-minimal-detail-boxes cell): box structure without the
+    /// title, status or revoke caption.
+    @ViewBuilder private var boxesDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        connectionBox
+        newClientBox
+        clientsBox
+      }
+      .padding(24)
+      .frame(maxWidth: 760, alignment: .leading)
+      .navigationTitle("Sharing")
+    }
+
+    /// The texts alone in the no-scroll VStack family (the
+    /// --arx-minimal-detail-texts cell): title, status and revoke
+    /// caption without any group box.
+    @ViewBuilder private var textsDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        bridgeTitle
+        bridgeStatus
+        revokeCaption
+      }
+      .padding(24)
+      .frame(maxWidth: 760, alignment: .leading)
       .navigationTitle("Sharing")
     }
 
@@ -314,67 +363,97 @@
       .navigationTitle("Sharing")
     }
 
-    /// The inner box content of the detail replica, shared verbatim by
-    /// contentDetail (inside the ScrollView) and noScrollDetail (without
-    /// it) so the two cells differ by exactly the container.
+    /// The inner box content of the detail replica, composed from the
+    /// same named pieces the bisection cells use, so every cell shares
+    /// verbatim element definitions and differs only in which pieces
+    /// are present.
     @ViewBuilder private var detailBoxContent: some View {
       VStack(alignment: .leading, spacing: 20) {
-        Text("Arx bridge")
-          .font(.largeTitle)
-        Text("Choose lists and actions for a new client. Highlighting a list does not share it.")
-          .foregroundStyle(Color(nsColor: .labelColor))
-          .accessibilityIdentifier("bridge-status")
-        GroupBox("Connection") {
-          VStack(alignment: .leading, spacing: 10) {
-            TextField("Exact remote HTTPS origin", text: $origin)
-              .textContentType(.URL)
-            TextField("Local port", text: $port)
-            Text("Keep the Mac, Arx and your connector running.")
-              .font(.caption)
-              .foregroundStyle(.primary)
-            HStack {
-              Button("Start bridge") {}
-                .accessibilityIdentifier("bridge-start")
-              Button("Stop all sharing", role: .destructive) {}
-                .accessibilityIdentifier("bridge-stop")
-                .disabled(true)
-            }
-          }
-          .padding(6)
-        }
-        GroupBox("New client") {
-          VStack(alignment: .leading, spacing: 10) {
-            TextField("Client label", text: $clientLabel)
-            Toggle("Read selected lists", isOn: $rightsRead)
-            Toggle("Create, edit, move, complete and reopen", isOn: $rightsManage)
-              .disabled(!rightsRead)
-            Toggle("Delete reminders with confirmation", isOn: $rightsDelete)
-              .disabled(!rightsRead)
-            Text(
-              "Select this new client's access. To change an existing client, revoke and pair again."
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            Button("Create single-use pairing secret") {}
-              .disabled(true)
-          }
-          .padding(6)
-        }
-        GroupBox("Clients") {
-          VStack(alignment: .leading, spacing: 8) {
-            Button("Refresh client status") {}
-            Text("No client has access.")
-              .foregroundStyle(.secondary)
-          }
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(6)
-        }
-        Text("Revoke stops new requests. Data already viewed and changes already saved remain.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        bridgeTitle
+        bridgeStatus
+        connectionBox
+        newClientBox
+        clientsBox
+        revokeCaption
       }
       .padding(24)
       .frame(maxWidth: 760, alignment: .leading)
+    }
+
+    @ViewBuilder private var bridgeTitle: some View {
+      Text("Arx bridge")
+        .font(.largeTitle)
+    }
+
+    @ViewBuilder private var bridgeStatus: some View {
+      Text("Choose lists and actions for a new client. Highlighting a list does not share it.")
+        .foregroundStyle(Color(nsColor: .labelColor))
+        .accessibilityIdentifier("bridge-status")
+    }
+
+    @ViewBuilder private var revokeCaption: some View {
+      Text("Revoke stops new requests. Data already viewed and changes already saved remain.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    /// The Connection group box, verbatim from ContentView's fixture
+    /// path with the fixture model's disabled states.
+    @ViewBuilder private var connectionBox: some View {
+      GroupBox("Connection") {
+        VStack(alignment: .leading, spacing: 10) {
+          TextField("Exact remote HTTPS origin", text: $origin)
+            .textContentType(.URL)
+          TextField("Local port", text: $port)
+          Text("Keep the Mac, Arx and your connector running.")
+            .font(.caption)
+            .foregroundStyle(.primary)
+          HStack {
+            Button("Start bridge") {}
+              .accessibilityIdentifier("bridge-start")
+            Button("Stop all sharing", role: .destructive) {}
+              .accessibilityIdentifier("bridge-stop")
+              .disabled(true)
+          }
+        }
+        .padding(6)
+      }
+    }
+
+    /// The New client group box, verbatim from ContentView's fixture
+    /// path with the fixture model's disabled states.
+    @ViewBuilder private var newClientBox: some View {
+      GroupBox("New client") {
+        VStack(alignment: .leading, spacing: 10) {
+          TextField("Client label", text: $clientLabel)
+          Toggle("Read selected lists", isOn: $rightsRead)
+          Toggle("Create, edit, move, complete and reopen", isOn: $rightsManage)
+            .disabled(!rightsRead)
+          Toggle("Delete reminders with confirmation", isOn: $rightsDelete)
+            .disabled(!rightsRead)
+          Text(
+            "Select this new client's access. To change an existing client, revoke and pair again."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          Button("Create single-use pairing secret") {}
+            .disabled(true)
+        }
+        .padding(6)
+      }
+    }
+
+    /// The Clients group box, verbatim from ContentView's fixture path.
+    @ViewBuilder private var clientsBox: some View {
+      GroupBox("Clients") {
+        VStack(alignment: .leading, spacing: 8) {
+          Button("Refresh client status") {}
+          Text("No client has access.")
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(6)
+      }
     }
 
     /// The full app's sidebar column probe when --arx-minimal-probes is

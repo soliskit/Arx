@@ -357,6 +357,54 @@ final class ArxUITests: XCTestCase {
       artifactName: "minimal-detail-noscroll-audit-window.png")
   }
 
+  /// Delta 8a of the ladder: the three group boxes alone in the
+  /// no-scroll VStack family (no title, status or revoke caption).
+  /// Plain sidebar, real labels, combo (probes+axgroup) base, so this
+  /// cell differs from the reproducing no-scroll cell by exactly the
+  /// texts. Bounded readings, hypotheses only: if the mismatch appears
+  /// here, the texts are not necessary for reproduction in this
+  /// configuration; if it does not appear, the boxes alone do not
+  /// reproduce it here and a single negative is not a causal exclusion.
+  /// Geometry is NOT held identical between cells (the no-scroll family
+  /// already grew the window); the actual window frame is recorded per
+  /// run and reported with the result, not assumed. A single run does
+  /// not establish recurrence. Known and declared: the plain sidebar
+  /// under the real label may show the delta-5b duplicate-role
+  /// coincidence; immaterial to the per-element mismatch discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureDetailBoxes() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-detail-boxes", "--arx-minimal-real-labels", "--arx-minimal-probes",
+        "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-detail-boxes-audit-window.png")
+  }
+
+  /// Delta 8b of the ladder: the texts alone in the no-scroll VStack
+  /// family (title, status, revoke caption; no group boxes). Plain
+  /// sidebar, real labels, combo (probes+axgroup) base, so this cell
+  /// differs from the reproducing no-scroll cell by exactly the boxes.
+  /// Bounded readings, hypotheses only: if the mismatch appears here,
+  /// the boxes are not necessary for reproduction in this
+  /// configuration; if it does not appear, the texts alone do not
+  /// reproduce it here and a single negative is not a causal exclusion.
+  /// Geometry is NOT held identical between cells; the actual window
+  /// frame is recorded per run and reported with the result, not
+  /// assumed. A single run does not establish recurrence. Known and
+  /// declared: the plain sidebar under the real label may show the
+  /// delta-5b duplicate-role coincidence; immaterial to the per-element
+  /// mismatch discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureDetailTexts() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-detail-texts", "--arx-minimal-real-labels", "--arx-minimal-probes",
+        "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-detail-texts-audit-window.png")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any
@@ -374,6 +422,10 @@ final class ArxUITests: XCTestCase {
 
     print("pre-audit-app-state: \(application.state.rawValue)")
     print("pre-audit-window-enabled: \(application.windows["main"].isEnabled)")
+    // Additive observation (delta 8): record the actual window frame per
+    // cell, because the no-scroll family demonstrated that geometry
+    // varies with content. Observation only, never an assertion.
+    print("pre-audit-window-frame: \(application.windows["main"].frame)")
     let auditPNG = application.screenshot().pngRepresentation
     let artifacts = URL(fileURLWithPath: "/tmp/uitest-artifacts")
     try? FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
