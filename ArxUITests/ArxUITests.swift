@@ -83,6 +83,7 @@ final class ArxUITests: XCTestCase {
     // Observations only, never assertions.
     print("pre-audit-app-state: \(application.state.rawValue)")
     print("pre-audit-window-enabled: \(application.windows["main"].isEnabled)")
+    contrastProbeObservation(application)
     let installedIdentifiers: Set<String> = ["column-sidebar", "column-detail", "window-content"]
     try application.performAccessibilityAudit { issue in
       var line = String(describing: issue)
@@ -316,6 +317,50 @@ final class ArxUITests: XCTestCase {
     }
     print(
       "window content observation: count=\(count) role=\(roleToken) labelPresent=\(labelPresent)")
+  }
+
+  /// Element-level pre-audit capture for the two flagged contrast elements
+  /// and two unflagged same-container references. Report only: one
+  /// fixed-token observation line and one element-scoped attachment per
+  /// element, plus one window attachment at the same instant. No assertion
+  /// is added and no observation is appended to any failing issue; the
+  /// strict audit runs exactly as before. Each line pairs the AX frame with
+  /// the attachment's point size and pixel dimensions, which together give
+  /// the actual screen scale factor that an AX frame alone cannot provide.
+  private func contrastProbeObservation(_ application: XCUIApplication) {
+    let probes: [(token: String, element: XCUIElement)] = [
+      ("banner", application.staticTexts["Fixture data - no real Reminders access"]),
+      ("bridge-status", application.staticTexts["bridge-status"]),
+      ("arx-bridge-title", application.staticTexts["Arx bridge"]),
+      (
+        "keep-running-caption",
+        application.staticTexts["Keep the Mac, Arx and your connector running."]
+      ),
+    ]
+    for probe in probes {
+      let element = probe.element
+      guard element.exists else {
+        print("contrast probe observation: token=\(probe.token) exists=false")
+        continue
+      }
+      let screenshot = element.screenshot()
+      let image = screenshot.image
+      var pixelToken = "pixels=unknown"
+      if let representation = image.representations.first {
+        pixelToken = "pixels=\(representation.pixelsWide)x\(representation.pixelsHigh)"
+      }
+      print(
+        "contrast probe observation: token=\(probe.token) exists=true frame=\(element.frame) enabled=\(element.isEnabled) selected=\(element.isSelected) type=\(element.elementType.rawValue) points=\(image.size.width)x\(image.size.height) \(pixelToken)"
+      )
+      let attachment = XCTAttachment(screenshot: screenshot)
+      attachment.name = "contrast-probe-\(probe.token)"
+      attachment.lifetime = .keepAlways
+      XCTContext.currentActivity?.add(attachment)
+    }
+    let windowAttachment = XCTAttachment(screenshot: application.windows["main"].screenshot())
+    windowAttachment.name = "contrast-probe-window"
+    windowAttachment.lifetime = .keepAlways
+    XCTContext.currentActivity?.add(windowAttachment)
   }
 
   private func columnContainerFindings(_ application: XCUIApplication) -> [String] {
