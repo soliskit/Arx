@@ -473,6 +473,56 @@ final class ArxUITests: XCTestCase {
       artifactName: "minimal-detail-box-clients-audit-window.png")
   }
 
+  /// Delta 10a of the ladder: the GroupBox chrome with inert content -
+  /// GroupBox("Connection") wrapping one default-styled placeholder
+  /// text, in the same no-scroll VStack family. This is a NEW
+  /// COMPOSITION (no prior cell gave the chrome inert content), not a
+  /// reduction. Plain sidebar, real labels, combo (probes+axgroup)
+  /// base, unchanged strict audit. Bounded readings, hypotheses only:
+  /// if the mismatch appears here, the chrome with inert content
+  /// suffices for reproduction in this configuration; if it does not
+  /// appear, this composition does not reproduce it here and a single
+  /// negative is not a causal exclusion. Geometry is NOT held identical
+  /// between cells; the actual window frame is recorded per run and
+  /// reported with the result, not assumed. A single run does not
+  /// establish recurrence. Known and declared: the plain sidebar under
+  /// the real label may show the delta-5b duplicate-role coincidence;
+  /// immaterial to the per-element mismatch discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureConnectionChrome() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-connection-chrome", "--arx-minimal-real-labels", "--arx-minimal-probes",
+        "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-connection-chrome-audit-window.png")
+  }
+
+  /// Delta 10b of the ladder: the connection box's exact contents
+  /// without the GroupBox chrome - a REDUCTION of the reproducing
+  /// delta-9a cell, rendering the verbatim-shared connectionBoxContent
+  /// builder in the same no-scroll VStack family. Plain sidebar, real
+  /// labels, combo (probes+axgroup) base, unchanged strict audit.
+  /// Bounded readings, hypotheses only: if the mismatch appears here,
+  /// the contents alone suffice for reproduction in this configuration
+  /// (and the chrome is not necessary here); if it does not appear,
+  /// the contents alone do not reproduce it here and a single negative
+  /// is not a causal exclusion. Geometry is NOT held identical between
+  /// cells; the actual window frame is recorded per run and reported
+  /// with the result, not assumed. A single run does not establish
+  /// recurrence. Known and declared: the plain sidebar under the real
+  /// label may show the delta-5b duplicate-role coincidence;
+  /// immaterial to the per-element mismatch discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureConnectionContents() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-connection-contents", "--arx-minimal-real-labels", "--arx-minimal-probes",
+        "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-connection-contents-audit-window.png")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any

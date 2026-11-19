@@ -32,7 +32,12 @@
   /// family; delta 9: --arx-minimal-detail-box-connection,
   /// --arx-minimal-detail-box-new-client and
   /// --arx-minimal-detail-box-clients reduce the reproducing boxes
-  /// cell to one group box each, same no-scroll family).
+  /// cell to one group box each, same no-scroll family; delta 10:
+  /// --arx-minimal-connection-chrome (GroupBox chrome with inert
+  /// content, a new composition) and --arx-minimal-connection-contents
+  /// (the connection box's exact contents without the chrome, a
+  /// verbatim reduction) split chrome versus contents inside the
+  /// reproducing connection box).
   /// Running the unchanged strict accessibility audit against each step
   /// separates findings caused by that component from findings the audit
   /// engine or CI environment produces on any app. Never compiled into
@@ -160,6 +165,26 @@
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-detail-box-clients")
     }
 
+    /// True only when a control test passes
+    /// --arx-minimal-connection-chrome: the detail column renders a
+    /// GroupBox("Connection") chrome wrapping one default-styled
+    /// placeholder text, in the same no-scroll VStack family. This is a
+    /// NEW COMPOSITION (the chrome has never carried inert content in
+    /// any prior cell), not a reduction of an existing cell.
+    private var connectionChromeRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-connection-chrome")
+    }
+
+    /// True only when a control test passes
+    /// --arx-minimal-connection-contents: the detail column renders the
+    /// connection box's exact inner contents with NO GroupBox chrome,
+    /// in the same no-scroll VStack family. Reduction of the
+    /// reproducing delta-9a cell: it shares connectionBoxContent
+    /// verbatim with connectionBox.
+    private var connectionContentsRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-connection-contents")
+    }
+
     /// True only when a control test passes --arx-minimal-fixture-labels:
     /// forces the fixture label tokens even when content mode is on, so
     /// the content+fixture-labels cell of the 2x2 runs with the label
@@ -262,6 +287,10 @@
         newClientBoxDetail
       } else if detailBoxClientsRequested {
         clientsBoxDetail
+      } else if connectionChromeRequested {
+        connectionChromeDetail
+      } else if connectionContentsRequested {
+        connectionContentsDetail
       } else {
         plainDetail
       }
@@ -416,6 +445,36 @@
       .navigationTitle("Sharing")
     }
 
+    /// Delta 10a: the GroupBox chrome with inert content (the
+    /// --arx-minimal-connection-chrome cell). NEW COMPOSITION, not a
+    /// reduction: GroupBox("Connection") wrapping one default-styled
+    /// placeholder text, in the same family wrapper. Tests whether the
+    /// box chrome/container structure alone reproduces here.
+    @ViewBuilder private var connectionChromeDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        GroupBox("Connection") {
+          Text("Fixture placeholder text")
+        }
+      }
+      .padding(24)
+      .frame(maxWidth: 760, alignment: .leading)
+      .navigationTitle("Sharing")
+    }
+
+    /// Delta 10b: the connection box's exact contents without the
+    /// chrome (the --arx-minimal-connection-contents cell). REDUCTION
+    /// of the reproducing delta-9a cell: renders connectionBoxContent,
+    /// the same builder connectionBox wraps in its GroupBox, so the
+    /// contents are verbatim identical by construction.
+    @ViewBuilder private var connectionContentsDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        connectionBoxContent
+      }
+      .padding(24)
+      .frame(maxWidth: 760, alignment: .leading)
+      .navigationTitle("Sharing")
+    }
+
     /// The full box content in a plain VStack WITHOUT the ScrollView
     /// wrapper (the --arx-minimal-detail-noscroll cell): identical box
     /// content to contentDetail, container structure removed. The
@@ -470,23 +529,31 @@
     /// path with the fixture model's disabled states.
     @ViewBuilder private var connectionBox: some View {
       GroupBox("Connection") {
-        VStack(alignment: .leading, spacing: 10) {
-          TextField("Exact remote HTTPS origin", text: $origin)
-            .textContentType(.URL)
-          TextField("Local port", text: $port)
-          Text("Keep the Mac, Arx and your connector running.")
-            .font(.caption)
-            .foregroundStyle(.primary)
-          HStack {
-            Button("Start bridge") {}
-              .accessibilityIdentifier("bridge-start")
-            Button("Stop all sharing", role: .destructive) {}
-              .accessibilityIdentifier("bridge-stop")
-              .disabled(true)
-          }
-        }
-        .padding(6)
+        connectionBoxContent
       }
+    }
+
+    /// The exact inner body of the connection group box, extracted
+    /// verbatim in delta 10 so that the box and the
+    /// --arx-minimal-connection-contents cell render the identical
+    /// contents. Any change here changes both cells together.
+    @ViewBuilder private var connectionBoxContent: some View {
+      VStack(alignment: .leading, spacing: 10) {
+        TextField("Exact remote HTTPS origin", text: $origin)
+          .textContentType(.URL)
+        TextField("Local port", text: $port)
+        Text("Keep the Mac, Arx and your connector running.")
+          .font(.caption)
+          .foregroundStyle(.primary)
+        HStack {
+          Button("Start bridge") {}
+            .accessibilityIdentifier("bridge-start")
+          Button("Stop all sharing", role: .destructive) {}
+            .accessibilityIdentifier("bridge-stop")
+            .disabled(true)
+        }
+      }
+      .padding(6)
     }
 
     /// The New client group box, verbatim from ContentView's fixture
