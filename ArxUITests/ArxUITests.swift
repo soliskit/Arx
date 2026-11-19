@@ -84,7 +84,46 @@ final class ArxUITests: XCTestCase {
     print("pre-audit-app-state: \(application.state.rawValue)")
     print("pre-audit-window-enabled: \(application.windows["main"].isEnabled)")
     contrastProbeObservation(application)
+    issues.append(contentsOf: try strictAuditIssueLines(application))
+    let artifacts = URL(fileURLWithPath: "/tmp/uitest-artifacts")
+    try? FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
+    try? auditPNG.write(to: artifacts.appendingPathComponent("audit-window.png"))
+    issues.append(contentsOf: grantToggleFindings(application))
+    XCTAssertTrue(issues.isEmpty, issues.joined(separator: "\n---\n"))
+  }
+
+  /// Minimal-fixture control run: audits a plain NavigationSplitView with a
+  /// navigation title and default-styled text, nothing Arx-specific, under
+  /// the SAME strict audit handler as the full-app audit. A Parent/Child
+  /// structural mismatch that reproduces here cannot come from Arx's own
+  /// view structure; one that does not narrows the lead back to it. The
+  /// same discrimination applies to contrast findings on default-styled
+  /// text. No filtering and no assertions beyond the audit's own issue
+  /// list.
+  @MainActor
+  func testAccessibilityAuditMinimalFixture() throws {
+    app.terminate()
+    app = XCUIApplication()
+    app.launchArguments = ["--bridge-fixtures", "--arx-minimal-fixture"]
+    app.launch()
+    XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
+    let application = app!
+
+    let issues = try strictAuditIssueLines(application)
+    XCTAssertTrue(issues.isEmpty, issues.joined(separator: "\n---\n"))
+  }
+
+  /// Runs the strict accessibility audit (every issue type, no filters) and
+  /// returns one self-contained line per finding: the full issue
+  /// description plus the audit-fixed installed-identifier match token and
+  /// element details, or the whole AX tree when the issue carries no
+  /// element. Shared by the full-app audit and the minimal-fixture control
+  /// so both apply the identical handler. The handler returns true for
+  /// every issue so the audit collects them all instead of throwing on the
+  /// first one; the caller asserts on the collected lines.
+  private func strictAuditIssueLines(_ application: XCUIApplication) throws -> [String] {
     let installedIdentifiers: Set<String> = ["column-sidebar", "column-detail", "window-content"]
+    var lines: [String] = []
     try application.performAccessibilityAudit { issue in
       var line = String(describing: issue)
       // Fixed token only: whether THIS issue's element carries one of the
@@ -103,14 +142,10 @@ final class ArxUITests: XCTestCase {
         // the mismatch.
         line += " | tree:\n" + application.debugDescription
       }
-      issues.append(line)
+      lines.append(line)
       return true
     }
-    let artifacts = URL(fileURLWithPath: "/tmp/uitest-artifacts")
-    try? FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
-    try? auditPNG.write(to: artifacts.appendingPathComponent("audit-window.png"))
-    issues.append(contentsOf: grantToggleFindings(application))
-    XCTAssertTrue(issues.isEmpty, issues.joined(separator: "\n---\n"))
+    return lines
   }
 
   /// AX role and containment observation for the column container probe.
