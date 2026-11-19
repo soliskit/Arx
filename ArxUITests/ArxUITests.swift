@@ -629,6 +629,86 @@ final class ArxUITests: XCTestCase {
       artifactName: "minimal-connection-port-field-audit-window.png")
   }
 
+  /// Delta 13a of the ladder: the connection origin text field
+  /// identical except for the removed .textContentType(.URL) modifier,
+  /// contrasted same-run with the reproducing delta-12a origin-field
+  /// cell (same label, same empty binding, same inner shape, same
+  /// no-scroll family wrapper). Plain sidebar, real labels, combo
+  /// (probes+axgroup) base, unchanged strict audit. Bounded readings,
+  /// hypotheses only: if the mismatch appears here, the origin field
+  /// without the modifier also suffices in this configuration and the
+  /// modifier is not necessary here; if it does not appear, that is a
+  /// single negative - the modifier is implicated in this
+  /// configuration only, not excluded generally. Geometry is NOT held
+  /// identical between cells; the actual window frame is recorded per
+  /// run and reported with the result, not assumed. A single run does
+  /// not establish recurrence. Known and declared: the plain sidebar
+  /// under the real label may show the delta-5b duplicate-role
+  /// coincidence; immaterial to the per-element mismatch
+  /// discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureConnectionOriginNoContentType() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-connection-origin-no-content-type", "--arx-minimal-real-labels",
+        "--arx-minimal-probes", "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-connection-origin-no-content-type-audit-window.png")
+  }
+
+  /// Delta 13b of the ladder: the new-client box's client-label text
+  /// field alone, a REDUCTION of the reproducing delta-9b new-client
+  /// box cell using that box's own inner VStack(alignment: .leading,
+  /// spacing: 10).padding(6) shape and the same no-scroll family
+  /// wrapper. A third tested field with a distinct label, a filled
+  /// value and no contentType modifier. Plain sidebar, real labels,
+  /// combo (probes+axgroup) base, unchanged strict audit. Bounded
+  /// readings, hypotheses only: if the mismatch appears here, this
+  /// third tested field also suffices in this configuration; that
+  /// says nothing about text fields generally. If it does not appear,
+  /// that is a single negative, not a causal exclusion. Geometry is
+  /// NOT held identical between cells; the actual window frame is
+  /// recorded per run and reported with the result, not assumed. A
+  /// single run does not establish recurrence. Known and declared: the
+  /// plain sidebar under the real label may show the delta-5b
+  /// duplicate-role coincidence; immaterial to the per-element
+  /// mismatch discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureNewClientLabelField() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-new-client-label-field", "--arx-minimal-real-labels",
+        "--arx-minimal-probes", "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-new-client-label-field-audit-window.png")
+  }
+
+  /// Delta 13c of the ladder: the new-client box's Read selected
+  /// lists Toggle alone, a second REDUCTION of the reproducing
+  /// delta-9b new-client box cell in that box's own inner shape and
+  /// the same no-scroll family wrapper, contrasting control type
+  /// against the single-field cells. Plain sidebar, real labels,
+  /// combo (probes+axgroup) base, unchanged strict audit. Bounded
+  /// readings, hypotheses only: if the mismatch appears here, THIS
+  /// tested Toggle cell suffices in this configuration - it says
+  /// nothing about interactive controls generally; if it does not
+  /// appear, that is a single negative, not a causal exclusion of
+  /// non-field controls. Geometry is NOT held identical between
+  /// cells; the actual window frame is recorded per run and reported
+  /// with the result, not assumed. A single run does not establish
+  /// recurrence. Known and declared: the plain sidebar under the real
+  /// label may show the delta-5b duplicate-role coincidence;
+  /// immaterial to the per-element mismatch discrimination.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureNewClientReadToggle() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-new-client-read-toggle", "--arx-minimal-real-labels",
+        "--arx-minimal-probes", "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-new-client-read-toggle-audit-window.png")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any

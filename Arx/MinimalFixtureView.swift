@@ -45,7 +45,15 @@
   /// --arx-minimal-connection-origin-field and
   /// --arx-minimal-connection-port-field reduce the reproducing fields
   /// cell to one verbatim text field each, same inner shape and
-  /// family).
+  /// family; delta 13: --arx-minimal-connection-origin-no-content-type
+  /// renders the origin field identical except for the removed
+  /// .textContentType(.URL) modifier, contrasted same-run with the
+  /// origin-field cell, and --arx-minimal-new-client-label-field
+  /// renders the existing client-label field alone in its own
+  /// new-client inner shape, a verbatim reduction of the new-client
+  /// box cell, and --arx-minimal-new-client-read-toggle renders the
+  /// existing Read selected lists Toggle alone in the same new-client
+  /// inner shape, a second verbatim reduction of that box cell).
   /// Running the unchanged strict accessibility audit against each step
   /// separates findings caused by that component from findings the audit
   /// engine or CI environment produces on any app. Never compiled into
@@ -229,6 +237,35 @@
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-connection-port-field")
     }
 
+    /// True only when a control test passes
+    /// --arx-minimal-connection-origin-no-content-type: the detail
+    /// column renders the connection origin text field identical
+    /// except for the removed .textContentType(.URL) modifier, in the
+    /// same inner shape and no-scroll family wrapper. Same-run
+    /// contrast with the reproducing delta-12a origin-field cell.
+    private var connectionOriginNoContentTypeRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-connection-origin-no-content-type")
+    }
+
+    /// True only when a control test passes
+    /// --arx-minimal-new-client-label-field: the detail column renders
+    /// only the new-client box's existing client-label text field in
+    /// that box's own inner shape and the no-scroll family wrapper.
+    /// Reduction of the reproducing delta-9b new-client box cell.
+    private var newClientLabelFieldRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-new-client-label-field")
+    }
+
+    /// True only when a control test passes
+    /// --arx-minimal-new-client-read-toggle: the detail column renders
+    /// only the new-client box's existing Read selected lists Toggle
+    /// in that box's own inner shape and the no-scroll family wrapper.
+    /// A second reduction of the reproducing delta-9b new-client box
+    /// cell, contrasting control type against the field cells.
+    private var newClientReadToggleRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-new-client-read-toggle")
+    }
+
     /// True only when a control test passes --arx-minimal-fixture-labels:
     /// forces the fixture label tokens even when content mode is on, so
     /// the content+fixture-labels cell of the 2x2 runs with the label
@@ -343,6 +380,12 @@
         connectionOriginFieldDetail
       } else if connectionPortFieldRequested {
         connectionPortFieldDetail
+      } else if connectionOriginNoContentTypeRequested {
+        connectionOriginNoContentTypeDetail
+      } else if newClientLabelFieldRequested {
+        newClientLabelFieldDetail
+      } else if newClientReadToggleRequested {
+        newClientReadToggleDetail
       } else {
         plainDetail
       }
@@ -599,6 +642,60 @@
       .navigationTitle("Sharing")
     }
 
+    /// Delta 13a: the origin field without its .textContentType(.URL)
+    /// modifier (the --arx-minimal-connection-origin-no-content-type
+    /// cell). Same inner VStack(alignment: .leading, spacing:
+    /// 10).padding(6) shape and family wrapper as the delta-12a
+    /// origin-field cell so the same-run contrast isolates the
+    /// removed modifier.
+    @ViewBuilder private var connectionOriginNoContentTypeDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 10) {
+          connectionOriginFieldNoContentType
+        }
+        .padding(6)
+      }
+      .padding(24)
+      .frame(maxWidth: 760, alignment: .leading)
+      .navigationTitle("Sharing")
+    }
+
+    /// Delta 13b: the new-client box's client-label field alone (the
+    /// --arx-minimal-new-client-label-field cell). REDUCTION of the
+    /// reproducing delta-9b new-client box cell, using the new-client
+    /// box's own inner VStack(alignment: .leading, spacing:
+    /// 10).padding(6) shape - not the connection shape - inside the
+    /// same family wrapper.
+    @ViewBuilder private var newClientLabelFieldDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 10) {
+          clientLabelField
+        }
+        .padding(6)
+      }
+      .padding(24)
+      .frame(maxWidth: 760, alignment: .leading)
+      .navigationTitle("Sharing")
+    }
+
+    /// Delta 13c: the new-client box's Read selected lists Toggle
+    /// alone (the --arx-minimal-new-client-read-toggle cell). A second
+    /// REDUCTION of the reproducing delta-9b new-client box cell, in
+    /// the new-client box's own inner VStack(alignment: .leading,
+    /// spacing: 10).padding(6) shape inside the same family wrapper,
+    /// contrasting control type against the single-field cells.
+    @ViewBuilder private var newClientReadToggleDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 10) {
+          readSelectedListsToggle
+        }
+        .padding(6)
+      }
+      .padding(24)
+      .frame(maxWidth: 760, alignment: .leading)
+      .navigationTitle("Sharing")
+    }
+
     /// The full box content in a plain VStack WITHOUT the ScrollView
     /// wrapper (the --arx-minimal-detail-noscroll cell): identical box
     /// content to contentDetail, container structure removed. The
@@ -696,6 +793,15 @@
       TextField("Local port", text: $port)
     }
 
+    /// Delta 13a: the connection origin text field identical except
+    /// for the removed .textContentType(.URL) modifier. Rendered alone
+    /// by the --arx-minimal-connection-origin-no-content-type cell for
+    /// a same-run contrast with the delta-12a origin-field cell;
+    /// connectionOriginField itself is unchanged.
+    @ViewBuilder private var connectionOriginFieldNoContentType: some View {
+      TextField("Exact remote HTTPS origin", text: $origin)
+    }
+
     /// The connection box's caption and button row, extracted verbatim
     /// in delta 11. Composed into connectionBoxContent and rendered
     /// alone by the --arx-minimal-connection-caption-buttons cell.
@@ -712,13 +818,27 @@
       }
     }
 
+    /// The new-client box's client label text field, extracted
+    /// verbatim in delta 13. Composed into newClientBox and rendered
+    /// alone by the --arx-minimal-new-client-label-field cell.
+    @ViewBuilder private var clientLabelField: some View {
+      TextField("Client label", text: $clientLabel)
+    }
+
+    /// The new-client box's Read selected lists Toggle, extracted
+    /// verbatim in delta 13. Composed into newClientBox and rendered
+    /// alone by the --arx-minimal-new-client-read-toggle cell.
+    @ViewBuilder private var readSelectedListsToggle: some View {
+      Toggle("Read selected lists", isOn: $rightsRead)
+    }
+
     /// The New client group box, verbatim from ContentView's fixture
     /// path with the fixture model's disabled states.
     @ViewBuilder private var newClientBox: some View {
       GroupBox("New client") {
         VStack(alignment: .leading, spacing: 10) {
-          TextField("Client label", text: $clientLabel)
-          Toggle("Read selected lists", isOn: $rightsRead)
+          clientLabelField
+          readSelectedListsToggle
           Toggle("Create, edit, move, complete and reopen", isOn: $rightsManage)
             .disabled(!rightsRead)
           Toggle("Delete reminders with confirmation", isOn: $rightsDelete)
