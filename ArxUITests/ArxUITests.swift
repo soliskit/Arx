@@ -871,6 +871,52 @@ final class ArxUITests: XCTestCase {
       observedTargetIdentifier: "caption-context-secondary-target")
   }
 
+  /// Delta 18a of the ladder: the plain half of the matched
+  /// bridge-status pair. The exact bridge-status string with its
+  /// real .primary foreground and default font, mounted alone - the
+  /// string whose full-app cell currently fails Contrast (one of
+  /// three current full-app audit findings; this pair probes only
+  /// that one and leaves the fixture-data Contrast and the unnamed
+  /// Parent/Child mismatch untouched). A hypothesis, not a fix.
+  /// Bounded readings, hypotheses only, pre-registered:
+  /// - If this half fails and the GroupBox sibling passes, the
+  ///   containment association observed for the default-foreground
+  ///   caption extends to THIS text/style/pair/run - association,
+  ///   not mechanism, and not by itself approval for any app change.
+  /// - If BOTH halves fail, no containment split is observed for
+  ///   THIS cell/run; that does not eliminate containment for other
+  ///   cells or configurations.
+  /// - If this half PASSES, the outcome contradicts the pair's
+  ///   premise; report raw verdicts only, no mechanism claim.
+  /// - A missing target or a frame mismatch makes the read
+  ///   inconclusive by design, never negative; a spacer correction
+  ///   would then be a separately proposed step. If the caption
+  ///   pairs in the same run do not reproduce their c14 verdicts,
+  ///   the run is anomalous: cross-pair reads downgrade to raw
+  ///   verdicts and no recurrence is claimed.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureBridgeStatusPlain() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: ["--arx-minimal-bridge-status-plain"],
+      artifactName: "minimal-bridge-status-plain-audit-window.png",
+      observedTargetIdentifier: "bridge-status-pair-target")
+  }
+
+  /// Delta 18b of the ladder: the GroupBox half of the matched
+  /// bridge-status pair. The SAME text element inside the same
+  /// GroupBox("Connection") containment at the same fixed
+  /// coordinates as its plain sibling. Read only together with
+  /// delta 18a and the recorded frames; every outcome branch is
+  /// bounded as declared on delta 18a, and neither half alone
+  /// carries a conclusion.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureBridgeStatusGroupBox() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: ["--arx-minimal-bridge-status-groupbox"],
+      artifactName: "minimal-bridge-status-groupbox-audit-window.png",
+      observedTargetIdentifier: "bridge-status-pair-target")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any

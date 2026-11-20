@@ -343,6 +343,24 @@
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-caption-context-groupbox-secondary")
     }
 
+    /// True only when a control test passes
+    /// --arx-minimal-bridge-status-plain: the plain half of the
+    /// matched bridge-status pair - the exact bridge-status string
+    /// with its real .primary foreground and default font, mounted
+    /// alone at fixed coordinates shared with the GroupBox half.
+    private var bridgeStatusPlainRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-bridge-status-plain")
+    }
+
+    /// True only when a control test passes
+    /// --arx-minimal-bridge-status-groupbox: the GroupBox half of the
+    /// matched bridge-status pair - the SAME text element inside the
+    /// same GroupBox("Connection") containment used by the caption
+    /// pairs.
+    private var bridgeStatusGroupBoxRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-bridge-status-groupbox")
+    }
+
     /// True only when a control test passes --arx-minimal-fixture-labels:
     /// forces the fixture label tokens even when content mode is on, so
     /// the content+fixture-labels cell of the 2x2 runs with the label
@@ -549,6 +567,10 @@
         captionContextPlainSecondaryDetail
       } else if captionContextGroupBoxSecondaryRequested {
         captionContextGroupBoxSecondaryDetail
+      } else if bridgeStatusPlainRequested {
+        bridgeStatusPlainDetail
+      } else if bridgeStatusGroupBoxRequested {
+        bridgeStatusGroupBoxDetail
       } else {
         plainDetail
       }
@@ -664,6 +686,46 @@
             .font(.caption)
             .foregroundStyle(.secondary)
             .accessibilityIdentifier("caption-context-secondary-target")
+        }
+      }
+      .padding(24)
+      .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
+      .navigationTitle("Fixture Sharing")
+    }
+
+    /// Delta 18a of the ladder: the plain half of the matched
+    /// bridge-status pair. The exact bridge-status string with its
+    /// real .primary foreground and default font, mounted alone. The
+    /// transparent spacers start from the caption pair's measured
+    /// correction (22pt/5pt) because the GroupBox chrome is
+    /// identical; the UI test records the actual AX frame and a
+    /// mismatch makes the comparison inconclusive, never negative.
+    @ViewBuilder private var bridgeStatusPlainDetail: some View {
+      VStack(alignment: .leading, spacing: 0) {
+        Color.clear.frame(height: 22)
+        HStack(alignment: .top, spacing: 0) {
+          Color.clear.frame(width: 5)
+          Text("Choose lists and actions for a new client. Highlighting a list does not share it.")
+            .foregroundStyle(.primary)
+            .accessibilityIdentifier("bridge-status-pair-target")
+        }
+      }
+      .padding(24)
+      .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
+      .navigationTitle("Fixture Sharing")
+    }
+
+    /// Delta 18b of the ladder: the GroupBox half of the matched
+    /// bridge-status pair. The SAME text element inside the same
+    /// GroupBox("Connection") containment used by the caption pairs.
+    /// The only intended difference from delta 18a is the immediate
+    /// container context.
+    @ViewBuilder private var bridgeStatusGroupBoxDetail: some View {
+      VStack(alignment: .leading, spacing: 0) {
+        GroupBox("Connection") {
+          Text("Choose lists and actions for a new client. Highlighting a list does not share it.")
+            .foregroundStyle(.primary)
+            .accessibilityIdentifier("bridge-status-pair-target")
         }
       }
       .padding(24)
