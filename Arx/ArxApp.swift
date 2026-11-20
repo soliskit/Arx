@@ -16,6 +16,10 @@ struct ArxApp: App {
         #if DEBUG
           if minimalFixtureRequested {
             MinimalFixtureView()
+              // c20: the same dump hook on the fixture branch. The body's
+              // branches are mutually exclusive, so the mainContent hook
+              // never ran in fixture launches. Writer and full gate unchanged.
+              .onAppear { ViewHierarchyDump.runIfRequested(isFixture: model.fixture) }
           } else {
             mainContent
           }

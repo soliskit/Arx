@@ -1115,6 +1115,24 @@ final class ArxUITests: XCTestCase {
       launchEnvironment["ARX_DUMP_NONCE"] = dumpNonce
     }
     app.launchEnvironment = launchEnvironment
+    // c20: bounded evidence of the launch configuration actually
+    // delivered - the fixed argument list, the dump flag's presence,
+    // the delivered environment KEY NAMES, and each nonce's shape
+    // validity. Never nonce values, candidate paths, or the wider
+    // environment. Observation only, never an assertion.
+    func nonceShape(_ value: String) -> Bool {
+      value.range(of: "^[0-9A-Fa-f-]{36}$", options: .regularExpression) != nil
+    }
+    print("launch-config: args=\(app.launchArguments.joined(separator: " "))")
+    print("launch-config: env-keys=\(launchEnvironment.keys.sorted().joined(separator: ","))")
+    print(
+      "launch-config: dump-flag=\(app.launchArguments.contains("--arx-dump-view-hierarchy"))"
+        + " responder-nonce-shape-ok=\(nonceShape(nonce))")
+    if geometryReceiptCell != nil {
+      print(
+        "launch-config: geometry-nonce-shape-ok=\(nonceShape(geometryNonce))"
+          + " dump-nonce-shape-ok=\(nonceShape(dumpNonce))")
+    }
     let phasesFileName = "arx-responder-phases-\(nonce).txt"
     let phasesFileCandidates = [
       URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(phasesFileName),
@@ -1362,6 +1380,10 @@ final class ArxUITests: XCTestCase {
       let lastYToken = field(8, "lastY"), isPendingOrSigned(lastYToken),
       let spanToken = field(9, "span"), isPendingOrSigned(spanToken)
     else { return invalid("grammar", "(raw: \(text))") }
+    // c20: the complete bounded raw receipt prints BEFORE any gate can
+    // return invalid, so every post-grammar verdict carries the full
+    // measurements (in c19 the fit half's trio was never captured).
+    print(lines[0])
     guard let seq = Int(seqToken), seq >= 1,
       let viewport = Double(viewportToken),
       let stackFrame = Double(stackFrameToken)
@@ -1402,7 +1424,6 @@ final class ArxUITests: XCTestCase {
       return invalid(
         "inequality", "(cell=\(expectedCell) viewport=\(viewport) stackFrame=\(stackFrame))")
     }
-    print(lines[0])
     return true
   }
 
@@ -1419,6 +1440,12 @@ final class ArxUITests: XCTestCase {
   /// structural bound and an over-cap file is rejected whole, never
   /// truncated. On success the complete block is printed to the
   /// test's own stdout, which reaches the retained log.
+  /// c20: the writer hook now also sits on the fixture branch
+  /// (ArxApp.body); the static exclusive-branch structure accounts for
+  /// the c16-c19 unreachable hook. That is a source fact about this
+  /// head, not a runtime guarantee of future transport: a file-absent
+  /// read still carries the residual unknown set {hook not reached in
+  /// this launch, gate element false, write-level failure}.
   private static let dumpReadLimit = 32768
 
   private func printViewHierarchyDump(from candidates: [URL]) -> Bool {
