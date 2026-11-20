@@ -591,7 +591,11 @@ final class ArxUITests: XCTestCase {
   /// not establish recurrence. Known and declared: the plain sidebar
   /// under the real label may show the delta-5b duplicate-role
   /// coincidence; immaterial to the per-element mismatch
-  /// discrimination.
+  /// discrimination. Delta 23: this cell additionally prints the
+  /// pre-audit AX tree snapshot (token connection-origin-field),
+  /// observation only - the focused half's pre-audit tree, paired
+  /// with its existing audit-time failure trees and the unfocused
+  /// half's new baseline.
   @MainActor
   func testAccessibilityAuditMinimalFixtureConnectionOriginField() throws {
     try runMinimalFixtureAudit(
@@ -599,7 +603,8 @@ final class ArxUITests: XCTestCase {
         "--arx-minimal-connection-origin-field", "--arx-minimal-real-labels",
         "--arx-minimal-probes", "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
       ],
-      artifactName: "minimal-connection-origin-field-audit-window.png")
+      artifactName: "minimal-connection-origin-field-audit-window.png",
+      accessibilityTreeToken: "connection-origin-field")
   }
 
   /// Delta 12b of the ladder: the connection port text field alone, a
@@ -729,7 +734,11 @@ final class ArxUITests: XCTestCase {
   /// assumed. A single run does not establish recurrence. Known and
   /// declared: the plain sidebar under the real label may show the
   /// delta-5b duplicate-role coincidence; immaterial to the
-  /// per-element mismatch discrimination.
+  /// per-element mismatch discrimination. Delta 23: this cell
+  /// additionally prints the pre-audit AX tree snapshot (token
+  /// connection-origin-field-unfocused), observation only - the
+  /// unfocused baseline the validity gate's tree comparison has never
+  /// had, since no nil-element issue fires here to produce one.
   @MainActor
   func testAccessibilityAuditMinimalFixtureConnectionOriginFieldUnfocused() throws {
     try runMinimalFixtureAudit(
@@ -737,7 +746,8 @@ final class ArxUITests: XCTestCase {
         "--arx-minimal-connection-origin-field-unfocused", "--arx-minimal-real-labels",
         "--arx-minimal-probes", "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
       ],
-      artifactName: "minimal-connection-origin-field-unfocused-audit-window.png")
+      artifactName: "minimal-connection-origin-field-unfocused-audit-window.png",
+      accessibilityTreeToken: "connection-origin-field-unfocused")
   }
 
   /// Delta 15: the verbatim delta-12a origin-field cell with keyboard
@@ -1074,7 +1084,8 @@ final class ArxUITests: XCTestCase {
     extraArguments: [String], artifactName: String,
     expectedPhaseLines: Int = 3, awaitCompletePhases: Bool = false,
     observedTargetIdentifier: String? = nil,
-    geometryReceiptCell: String? = nil
+    geometryReceiptCell: String? = nil,
+    accessibilityTreeToken: String? = nil
   ) throws {
     app.terminate()
     app = XCUIApplication()
@@ -1190,6 +1201,27 @@ final class ArxUITests: XCTestCase {
     let artifacts = URL(fileURLWithPath: "/tmp/uitest-artifacts")
     try? FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
     try? auditPNG.write(to: artifacts.appendingPathComponent(artifactName))
+
+    // Delta 23: the pre-audit accessibility-tree snapshot, gated by
+    // token to the origin-field matched pair (nil elsewhere, so no
+    // other cell prints). Observation only, never an assertion. This
+    // is XCUI's own debugDescription tree at the pre-audit point -
+    // the same property the nil-element audit handler appends at
+    // audit time - not the audit engine's internal element pair,
+    // which no public API exposes. The focused cell's audit-time tree
+    // already exists in its failure dumps; the unfocused cell has no
+    // tree anywhere, so this supplies the missing baseline plus a
+    // pre-audit focused tree for cross-checking pre-audit versus
+    // audit-time stability. The offline structural diff MAY NARROW
+    // CANDIDATES for the unnamed mismatch element; it cannot identify
+    // the engine's flagged element, and a run showing no structural
+    // difference is inconclusive by design, never a negative. A
+    // read-only AX walk: no UI mutation, no focus change.
+    if let accessibilityTreeToken {
+      print("pre-audit-ax-tree-begin: \(accessibilityTreeToken)")
+      print(application.debugDescription)
+      print("pre-audit-ax-tree-end: \(accessibilityTreeToken)")
+    }
 
     let issues: [String]
     if awaitCompletePhases {
