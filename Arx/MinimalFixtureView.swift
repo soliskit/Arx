@@ -379,6 +379,39 @@
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-sidebar-banner-no-capsule")
     }
 
+    /// Runtime-measured geometry for the delta-21 scroll pair: the
+    /// rendered viewport height and the scroll content height. Both
+    /// start nil; the receipt is written only once both are measured.
+    @State private var scrollViewportHeight: CGFloat?
+    @State private var scrollContentHeight: CGFloat?
+
+    /// True only when a control test passes --arx-minimal-scroll-fit:
+    /// the texts cell content inside a ScrollView pinned to a fixed
+    /// 300-point viewport, with content that fits. Half of the delta-21
+    /// matched pair; the window cannot grow to absorb content here
+    /// because the scroll view's frame is fixed.
+    private var scrollFitRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-scroll-fit")
+    }
+
+    /// True only when a control test passes --arx-minimal-scroll-overflow:
+    /// the same pinned-viewport ScrollView cell plus a trailing clear
+    /// filler, so the content overflows the viewport. The other half of
+    /// the delta-21 matched pair; the only intended difference from the
+    /// fit half is scroll-content height.
+    private var scrollOverflowRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-scroll-overflow")
+    }
+
+    /// True only when a control test passes --arx-minimal-banner-alone:
+    /// the fixture banner line (standard capsule form, verbatim) alone
+    /// in the plain detail family, without the sidebar, List or any
+    /// sibling. The whole context bundle varies at once; readings stay
+    /// bundle-bounded.
+    private var bannerAloneRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-banner-alone")
+    }
+
     /// True only when a control test passes --arx-minimal-fixture-labels:
     /// forces the fixture label tokens even when content mode is on, so
     /// the content+fixture-labels cell of the 2x2 runs with the label
@@ -530,6 +563,25 @@
         .write(to: file, atomically: true, encoding: .utf8)
     }
 
+    /// The geometry receipt channel (delta 21) mirrors the responder
+    /// phases channel: a fresh per-launch nonce names the file, and a
+    /// missing or stale file reads INVALID on the test side, never a
+    /// fits/overflow finding. Only the scroll pair cells write it.
+    private static var geometryFile: URL? {
+      guard let nonce = ProcessInfo.processInfo.environment["ARX_GEOMETRY_NONCE"],
+        nonce.range(of: "^[0-9A-Fa-f-]{36}$", options: .regularExpression) != nil
+      else { return nil }
+      return FileManager.default.temporaryDirectory
+        .appendingPathComponent("arx-geometry-\(nonce).txt")
+    }
+
+    /// One atomic single-line write: the receipt is written once at
+    /// layout, so no read-modify-write serialization is needed.
+    private static func writeGeometryReceipt(_ line: String, to file: URL?) {
+      guard let file else { return }
+      try? (line + "\n").write(to: file, atomically: true, encoding: .utf8)
+    }
+
     @ViewBuilder private var sidebarColumn: some View {
       if sidebarContentActive || bannerNoCapsuleRequested {
         contentSidebar
@@ -551,6 +603,10 @@
         textsDetail
       } else if heightOverflowRequested {
         heightOverflowDetail
+      } else if scrollFitRequested || scrollOverflowRequested {
+        scrollPairDetail
+      } else if bannerAloneRequested {
+        bannerAloneDetail
       } else if detailBoxConnectionRequested {
         connectionBoxDetail
       } else if detailBoxNewClientRequested {
@@ -883,6 +939,84 @@
         bridgeStatus
         revokeCaption
         Color.clear.frame(height: 1600)
+      }
+      .padding(24)
+      .frame(maxWidth: 760, alignment: .leading)
+      .navigationTitle("Sharing")
+    }
+
+    /// Delta 21 of the ladder: the scroll pair. The texts cell content
+    /// inside a ScrollView pinned to a fixed 300-point viewport, so the
+    /// window stays at its fitting size for both halves and any
+    /// overflow happens inside the viewport, which cannot grow. The fit
+    /// half is the control; the overflow half adds only a trailing
+    /// 1600-point clear filler. Both geometry values are MEASURED, not
+    /// declared: a GeometryReader inside the scroll content measures
+    /// the content height, and a second GeometryReader behind the
+    /// framed ScrollView measures the rendered viewport height. The
+    /// receipt is written once both measurements have landed. The
+    /// registered evidence gate requires the receipt (fit half must
+    /// measure content at most the viewport; the overflow half at
+    /// least twice the viewport) plus equal recorded window frames;
+    /// the test fails on a missing, malformed or inequality-violating
+    /// receipt, so an invalid run can never read as a clean negative.
+    /// Bounded readings, hypotheses only: bridge-status flagged in the
+    /// overflow half but not the fit half implicates scroll-overflow
+    /// for these cells (association, one run); unflagged in the
+    /// overflow half does not bear the hypothesis out here, and a
+    /// single run does not establish recurrence.
+    @ViewBuilder private var scrollPairDetail: some View {
+      ScrollView {
+        VStack(alignment: .leading, spacing: 20) {
+          bridgeTitle
+          bridgeStatus
+          revokeCaption
+          if scrollOverflowRequested {
+            Color.clear.frame(height: 1600)
+          }
+        }
+        .padding(24)
+        .background(
+          GeometryReader { proxy in
+            Color.clear.onAppear { scrollContentHeight = proxy.size.height }
+          }
+        )
+      }
+      .frame(height: 300)
+      .background(
+        GeometryReader { proxy in
+          Color.clear.onAppear { scrollViewportHeight = proxy.size.height }
+        }
+      )
+      .frame(maxWidth: 760, alignment: .leading)
+      .navigationTitle("Sharing")
+      .onChange(of: scrollContentHeight) { writeScrollGeometryReceipt() }
+      .onChange(of: scrollViewportHeight) { writeScrollGeometryReceipt() }
+    }
+
+    /// The receipt goes out once, when both runtime measurements have
+    /// landed; before that there is nothing to report and the test
+    /// side reads INVALID. Both halves use the same writer.
+    private func writeScrollGeometryReceipt() {
+      guard let content = scrollContentHeight, let viewport = scrollViewportHeight else {
+        return
+      }
+      Self.writeGeometryReceipt(
+        "scroll-geometry: cell=\(scrollOverflowRequested ? "overflow" : "fit")"
+          + " viewport=\(viewport) content=\(content)",
+        to: Self.geometryFile)
+    }
+
+    /// Delta 22 of the ladder: the banner alone. The fixture banner
+    /// line, standard capsule form verbatim, without the sidebar, List
+    /// or any sibling. The whole context bundle varies at once, so
+    /// readings stay bundle-bounded: flagged alone implicates the
+    /// text/style family in this configuration (association, one run);
+    /// unflagged alone implicates the context bundle, not any single
+    /// variable. A single run does not establish recurrence.
+    @ViewBuilder private var bannerAloneDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        fixtureBanner
       }
       .padding(24)
       .frame(maxWidth: 760, alignment: .leading)

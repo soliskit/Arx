@@ -968,6 +968,90 @@ final class ArxUITests: XCTestCase {
       artifactName: "minimal-sidebar-banner-no-capsule-audit-window.png")
   }
 
+  /// Delta 21a of the reduction ladder: the scroll pair's fit half.
+  /// The texts cell content inside a ScrollView pinned to a fixed
+  /// 300-point viewport, with content that fits. Matched control for
+  /// the overflow half; the only intended difference between the
+  /// halves is scroll-content height. Registered evidence gates: the
+  /// two halves must record EQUAL pre-audit window frames (a
+  /// difference is INVALID, never negative); the bridge-status target
+  /// frame is recorded in both; both view-hierarchy dumps are
+  /// captured; and the geometry receipt must be delivered with both
+  /// values measured at runtime (a GeometryReader behind the framed
+  /// ScrollView measures the viewport, a second inside the content
+  /// measures the content) and the inequality enforced numerically -
+  /// this half must measure content at most the measured viewport. A
+  /// fixed frame alone is not runtime proof after c16's lesson: a
+  /// missing, malformed or inequality-violating receipt FAILS the
+  /// test, never a fits finding.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureScrollFit() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-scroll-fit",
+        "--arx-minimal-real-labels",
+        "--arx-minimal-probes",
+        "--arx-minimal-axgroup",
+        "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-scroll-fit-audit-window.png",
+      observedTargetIdentifier: "bridge-status",
+      geometryReceiptCell: "fit")
+  }
+
+  /// Delta 21b of the reduction ladder: the scroll pair's overflow
+  /// half. Identical to the fit half plus a trailing 1600-point clear
+  /// filler inside the scroll content, so the content overflows the
+  /// pinned 300-point viewport - the configuration the failing app
+  /// cells actually render (status at scroll-rest top, content
+  /// overflowing below), which the c16 window-growth cell could not
+  /// construct. Same registered gates as the fit half; this half's
+  /// receipt must measure content at least twice the measured
+  /// viewport. Bounded
+  /// readings, hypotheses only: bridge-status flagged here but not in
+  /// the fit half implicates scroll-overflow for these cells
+  /// (association, one run); unflagged here does not bear the
+  /// hypothesis out in this run, and a single negative is not a
+  /// causal exclusion. A single run does not establish recurrence.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureScrollOverflow() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-scroll-overflow",
+        "--arx-minimal-real-labels",
+        "--arx-minimal-probes",
+        "--arx-minimal-axgroup",
+        "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-scroll-overflow-audit-window.png",
+      observedTargetIdentifier: "bridge-status",
+      geometryReceiptCell: "overflow")
+  }
+
+  /// Delta 22 of the reduction ladder: the banner alone. The fixture
+  /// banner line, standard capsule form verbatim, without the sidebar,
+  /// List or any sibling. The whole context bundle varies at once, so
+  /// the registered readings stay bundle-bounded: flagged alone
+  /// implicates the text/style family in this configuration
+  /// (association, one run) - it cannot isolate font, color or padding
+  /// as the cause; unflagged alone implicates the context bundle, not
+  /// any single variable. The delta-20 capsule negative was bounded to
+  /// its own configuration and does not transfer here. Census reading
+  /// only: the banner carries no accessibility identifier. A single
+  /// run does not establish recurrence.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureBannerAlone() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-banner-alone",
+        "--arx-minimal-real-labels",
+        "--arx-minimal-probes",
+        "--arx-minimal-axgroup",
+        "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-banner-alone-audit-window.png")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any
@@ -978,7 +1062,8 @@ final class ArxUITests: XCTestCase {
   private func runMinimalFixtureAudit(
     extraArguments: [String], artifactName: String,
     expectedPhaseLines: Int = 3, awaitCompletePhases: Bool = false,
-    observedTargetIdentifier: String? = nil
+    observedTargetIdentifier: String? = nil,
+    geometryReceiptCell: String? = nil
   ) throws {
     app.terminate()
     app = XCUIApplication()
@@ -1008,7 +1093,15 @@ final class ArxUITests: XCTestCase {
     //    fails and the outcome is INVALID, never negative. No runtime
     //    validity is claimed before actual descriptor delivery.
     let nonce = UUID().uuidString
-    app.launchEnvironment = ["ARX_RESPONDER_PHASES_NONCE": nonce]
+    var launchEnvironment = ["ARX_RESPONDER_PHASES_NONCE": nonce]
+    // Geometry receipt channel (delta 21): same nonce-per-launch
+    // fail-closed pattern as the responder phases, written by the
+    // scroll pair cells only.
+    let geometryNonce = UUID().uuidString
+    if geometryReceiptCell != nil {
+      launchEnvironment["ARX_GEOMETRY_NONCE"] = geometryNonce
+    }
+    app.launchEnvironment = launchEnvironment
     let phasesFileName = "arx-responder-phases-\(nonce).txt"
     let phasesFileCandidates = [
       URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(phasesFileName),
@@ -1021,7 +1114,17 @@ final class ArxUITests: XCTestCase {
     // throws. Removal is best-effort: a leftover file carries a stale
     // nonce that no future launch can match, so residue is never
     // consumed.
-    defer { for file in phasesFileCandidates { try? FileManager.default.removeItem(at: file) } }
+    let geometryFileName = "arx-geometry-\(geometryNonce).txt"
+    let geometryFileCandidates = [
+      URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(geometryFileName),
+      URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("Library/Containers/com.soliskit.Arx/Data/tmp")
+        .appendingPathComponent(geometryFileName),
+    ]
+    defer {
+      for file in phasesFileCandidates { try? FileManager.default.removeItem(at: file) }
+      for file in geometryFileCandidates { try? FileManager.default.removeItem(at: file) }
+    }
     XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
     let application = app!
 
@@ -1064,6 +1167,17 @@ final class ArxUITests: XCTestCase {
       // or mis-encoded is INVALID. The audit above is unchanged; these
       // lines are observation, never assertions.
       printResponderPhases(from: phasesFileCandidates)
+    }
+    // Geometry receipt (delta 21): fail-closed. The registered
+    // reading of the scroll pair requires this receipt; a missing,
+    // malformed or inequality-violating one fails the test below, so
+    // the cell is INVALID, never a fits/overflow finding.
+    if let geometryReceiptCell {
+      // Fail-closed: an invalid receipt fails the test, so an invalid
+      // run can never read as a clean audit negative.
+      if !printGeometryReceipt(from: geometryFileCandidates, expectedCell: geometryReceiptCell) {
+        XCTFail("scroll-geometry: INVALID")
+      }
     }
     XCTAssertTrue(issues.isEmpty, issues.joined(separator: "\n---\n"))
   }
@@ -1117,6 +1231,55 @@ final class ArxUITests: XCTestCase {
   private func printResponderPhases(from candidates: [URL]) {
     guard let lines = readResponderPhases(from: candidates, expectedLines: 3) else { return }
     for line in lines { print(line) }
+  }
+
+  /// Delta 21 geometry receipt read, fail-closed: exactly one line of
+  /// the shape "scroll-geometry: cell=<expected> viewport=<measured>
+  /// content=<measured>" with the registered inequality enforced
+  /// numerically (fit: content at most viewport; overflow: content at
+  /// least twice viewport). Both geometry values are runtime
+  /// measurements written by the fixture; nothing here asserts the
+  /// declared 300-point frame. Anything missing, malformed, stale,
+  /// extra or inequality-violating prints INVALID once and returns
+  /// false so the caller fails the test. Bounded at the byte level
+  /// like the phases read.
+  private func printGeometryReceipt(from candidates: [URL], expectedCell: String) -> Bool {
+    func invalid() -> Bool {
+      print("scroll-geometry: INVALID")
+      return false
+    }
+    guard let file = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+      let handle = try? FileHandle(forReadingFrom: file)
+    else { return invalid() }
+    defer { try? handle.close() }
+    let data = handle.readData(ofLength: Self.phasesReadLimit + 1)
+    guard data.count <= Self.phasesReadLimit,
+      let text = String(data: data, encoding: .utf8)
+    else { return invalid() }
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+    guard lines.count == 1,
+      let match = lines[0].wholeMatch(
+        of: #/^scroll-geometry: cell=([a-z]+) viewport=([0-9.]+) content=([0-9.]+)$/#),
+      String(match.1) == expectedCell,
+      let viewport = Double(match.2),
+      let content = Double(match.3)
+    else { return invalid() }
+    // Digit-shaped strings can still parse to infinity, and a zero
+    // viewport would make the overflow inequality vacuous; require
+    // finite, positive measurements explicitly.
+    guard viewport.isFinite, content.isFinite, viewport > 0, content > 0
+    else { return invalid() }
+    // The registered inequality, enforced numerically: the fit half
+    // must measure content at most the measured viewport; the overflow
+    // half at least twice it. Anything else is INVALID, never a
+    // fits/overflow finding.
+    let inequalityHolds =
+      expectedCell == "fit"
+      ? content <= viewport
+      : content >= 2 * viewport
+    guard inequalityHolds else { return invalid() }
+    print(lines[0])
+    return true
   }
 
   /// Awaited variant for the late-displacement cell (delta 15): polls
