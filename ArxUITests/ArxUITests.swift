@@ -897,7 +897,7 @@ final class ArxUITests: XCTestCase {
       print("pre-audit-first-responder: invalid-partial")
       return nil
     }
-    return Array(lines)
+    return lines.map(String.init)
   }
 
   /// Prints the three DEBUG responder-phase descriptors the app handed
@@ -976,7 +976,7 @@ final class ArxUITests: XCTestCase {
         line.hasPrefix("pre-audit-first-responder-\(index): ")
           && !line.dropFirst("pre-audit-first-responder-\(index): ".count).isEmpty
       }
-    return valid ? Array(lines) : nil
+    return valid ? lines.map(String.init) : nil
   }
 
   /// Runs the strict accessibility audit (every issue type, no filters) and
