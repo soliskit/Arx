@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # Weekly run of the legs in this workflow: Saturday 7 AM Pacific year-round,
+  # daylight-saving safe via the schedule timezone key (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onschedule).
+  schedule:
+    - cron: "0 7 * * 6"
+      timezone: "America/Los_Angeles"
 
 permissions:
   contents: read
@@ -106,6 +111,30 @@ jobs:
           path: |
             ${{ runner.temp }}/capture/generated-workspace.resolved
             ${{ runner.temp }}/capture/facts.txt
+  # The Safari leg runs only when the code it covers changes; pushes,
+  # dispatches and the weekly run always run it.
+  changes:
+    runs-on: ubuntu-22.04
+    outputs:
+      safari: ${{ steps.filter.outputs.safari }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "safari=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)"
+          printf 'Covered-path input:\n%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -Eq '^(BridgeCore/|Package\.swift|Package\.resolved|scripts/browser-proof-safari\.mjs|scripts/browser-outcomes\.mjs|scripts/browser-edits\.mjs|^\.github/workflows/build\.yml$)'; then
+            echo "safari=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "safari=false" >> "$GITHUB_OUTPUT"
+          fi
   build:
     runs-on: xcode-27
     steps:
@@ -315,3 +344,71 @@ jobs:
         with:
           name: arx-browser-fixtures
           path: browser-evidence/
+
+  safari-proof:
+    needs: changes
+    if: needs.changes.outputs.safari == 'true'
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 27.2
+        run: |
+          if [ -d /Applications/Xcode_27.2.app ]; then
+            sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+      - name: Enable Safari WebDriver and map the fixture host
+        run: |
+          set -euo pipefail
+          sudo safaridriver --enable
+          echo "127.0.0.1 bridge.example.test" | sudo tee -a /etc/hosts
+      - name: Build the fixture server
+        run: swift build --product BridgeFixtureServer --jobs 2
+      - name: Run the Safari fixture proof
+        run: |
+          bash scripts/check-listener-exclusivity.sh .build/debug/BridgeFixtureServer
+          node scripts/browser-proof-safari.mjs .build/debug/BridgeFixtureServer safari-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arx-safari-fixtures
+          path: safari-evidence/
+
+  # Merge gate for the gated leg: passes when the leg either ran green or was
+  # legitimately skipped because its covered code did not change. A leg that
+  # ran and failed or was cancelled, or a coverage gate that could not decide,
+  # fails this check.
+  slow-legs:
+    if: always()
+    needs: [changes, safari-proof]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Aggregate the gated legs
+        env:
+          GATE_SAFARI: ${{ needs.changes.outputs.safari }}
+          SAFARI_RESULT: ${{ needs.safari-proof.result }}
+        run: |
+          set -euo pipefail
+          check() {
+            local gate="$1" result="$2" name="$3"
+            if [ -z "$gate" ]; then
+              echo "::error::coverage gate for $name could not decide (changes job did not report)"
+              return 1
+            fi
+            if [ "$gate" = "true" ]; then
+              if [ "$result" != "success" ]; then
+                echo "::error::$name covered changed code and ended $result"
+                return 1
+              fi
+              echo "$name ran and passed."
+            else
+              if [ "$result" != "skipped" ] && [ "$result" != "success" ]; then
+                echo "::error::$name did not cover changed code but ended $result instead of skipping"
+                return 1
+              fi
+              echo "$name skipped: covered code unchanged."
+            fi
+          }
+          check "$GATE_SAFARI" "$SAFARI_RESULT" "safari-proof"
