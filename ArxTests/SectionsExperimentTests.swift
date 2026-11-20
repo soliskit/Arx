@@ -42,8 +42,8 @@ import Testing
     #expect(model.report.contains("Section matched: yes"))
     #expect(!model.report.contains("fixture-item"))
     #expect(!model.report.contains("fixture-source"))
-    #expect(!model.report.contains("Disposable"))
-    #expect(!model.report.contains("PRIVATE"))
+    #expect(model.report.contains("Reminder: Disposable Sections check"))
+    #expect(model.report.contains("Expected section: PRIVATE section text"))
     let before = model.report
     model.loadLabels()
     model.locate()

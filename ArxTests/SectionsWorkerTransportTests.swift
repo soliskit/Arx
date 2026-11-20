@@ -557,7 +557,7 @@ struct SectionsWorkerTransportTests {
       """
       cat > /dev/null
       printf 'stage=input.read.before\n'
-      padding=$(head -c 16000 < /dev/zero | tr '\0' 'x')
+      padding=$(head -c 16000 < /dev/zero | tr '\\0' 'x')
       printf '{"state":"unknown","reason":"%s"}' "$padding"
       exit 0
       """, into: artifacts)
@@ -574,7 +574,7 @@ struct SectionsWorkerTransportTests {
       """
       cat > /dev/null
       printf 'stage=input.read.before\n'
-      padding=$(head -c 16400 < /dev/zero | tr '\0' 'x')
+      padding=$(head -c 16400 < /dev/zero | tr '\\0' 'x')
       printf '{"state":"unknown","reason":"%s"}' "$padding"
       exit 0
       """, into: artifacts)
