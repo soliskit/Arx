@@ -2,23 +2,35 @@
 
 An isolated, unmerged experiment. This does not ship Sections or qualify private
 API behavior. The normal Arx interface is unchanged unless an experiment launch
-argument is present. No entitlement, signing identity, bundle identifier,
-dependency, account, tunnel or permission setting is changed.
+argument is present. The app's own entitlement set, signing
+identity, bundle identifier, dependency, account, tunnel and permission
+settings are unchanged. The transport repair adds an embedded helper tool
+target inside the app bundle, signed with only the app-sandbox and inherit
+entitlements.
 
 ## Modes and safety boundaries
 
 - `--sections-local-experiment`: local selection UI. It does NOT construct the
   normal BridgeViewModel, SharingController, listener or pairing UI. Sharing and
   the tunnel must remain off. It never requests Reminders permission.
-- `--sections-local-worker`: bounded child entry point in the SAME app executable,
-  before SwiftUI or normal model construction. It receives local JSON over a
-  pipe, not a network request. It refuses missing existing full Reminders access.
-  It never requests permission, starts a server, writes reminders or constructs
-  a new private default store. An independently launched worker is NOT Arx client
-  authorization; this experiment must never become a network endpoint. Combined
-  with `--sections-local-fixtures`, it instead refuses with `fixture_no_provider`
-  before any EventKit store, existing permission state or private provider is
-  touched; hosted same-app smoke checks use only that mode.
+- `--sections-local-worker`: bounded worker entry point retained in the app
+  executable for hosted same-app smoke checks only; nothing in production
+  launches it. The production transport spawns the embedded ArxSectionsWorker
+  helper tool inside the app bundle via
+  `Bundle.main.url(forAuxiliaryExecutable:)`, before SwiftUI or normal model
+  construction. The worker receives local JSON over a pipe, not a network
+  request. It refuses missing existing full Reminders access. It never
+  requests permission, starts a server, writes reminders or constructs a new
+  private default store. An independently launched worker is NOT Arx client
+  authorization; this experiment must never become a network endpoint.
+  Combined with `--sections-local-fixtures`, it instead refuses with
+  `fixture_no_provider` before any EventKit store, existing permission state
+  or private provider is touched.
+- `--sections-local-helper-fixtures`: synthetic smoke mode for the signed
+  composition. The app resolves its embedded helper, spawns it with
+  `--sections-local-fixtures`, passes the raw marker/JSON stream and exit
+  status through unmodified, and exits before any GUI. Hosted transport smoke
+  checks use only this mode; it never reaches the production UI flow.
 - `--sections-local-fixtures`: visibly labeled synthetic UI. All results come
   from fixed model fixtures, with no child launch, EventKit store or private
   provider. `--sections-local-fixture-result` additionally previews the final

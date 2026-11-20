@@ -361,7 +361,7 @@ nonisolated struct SectionsReply: Codable, Sendable {
   }
 }
 
-// The child is this SAME app executable, signed with the existing app identity.
+// The child is the ArxSectionsWorker helper tool embedded in this app bundle.
 // It has no GUI, listener or permission request. Missing inherited access refuses.
 enum SectionsWorkerTransport {
   // Fixed marker protocol: the worker emits complete lines "stage=<op>.<before|after>"
@@ -470,12 +470,10 @@ enum SectionsWorkerTransport {
   }
 
   nonisolated static func call(action: String, fields: [String: String]) -> SectionsReply {
-    guard let executable = Bundle.main.executableURL else {
+    guard let executable = Bundle.main.url(forAuxiliaryExecutable: "ArxSectionsWorker") else {
       return SectionsReply(state: "unknown", reason: "spawn_unavailable")
     }
-    return call(
-      executable: executable, arguments: ["--sections-local-worker"], action: action, fields: fields
-    )
+    return call(executable: executable, arguments: [], action: action, fields: fields)
   }
 
   // Synthetic tests substitute the child executable and arguments. The protocol,

@@ -12,6 +12,8 @@
   },
   "files": [
     { "kind": "folder", "path": "Arx", "target-membership": [ "Arx" ] },
+    { "kind": "folder", "path": "SectionsWorker", "target-membership": [ "Arx", "ArxSectionsWorker" ] },
+    { "kind": "folder", "path": "SectionsWorkerTool", "target-membership": [ "ArxSectionsWorker" ] },
     { "kind": "folder", "path": "ArxTests", "target-membership": [ "ArxTests" ] },
     { "kind": "folder", "path": "ArxUITests", "target-membership": [ "ArxUITests" ] },
     {
@@ -21,6 +23,7 @@
         { "path": "<PRODUCTS>/Arx.app", "id": "D69968DA30AAA46000659955", "type": "wrapper.application", "index": false },
         { "path": "<PRODUCTS>/ArxTests.xctest", "id": "D69968E730AAA46200659955", "type": "wrapper.cfbundle", "index": false },
         { "path": "<PRODUCTS>/ArxUITests.xctest", "id": "D69968F130AAA46200659955", "type": "wrapper.cfbundle", "index": false },
+        { "path": "<PRODUCTS>/ArxSectionsWorker", "id": "D699690230AAA46400659955", "type": "compiled.mach-o.executable", "index": false, "target-membership": [ { "build-phase": "Arx/copy/Embed Helper Tools", "code-sign-on-copy": true } ] },
       ],
     },
   ],
@@ -31,12 +34,13 @@
       "id": "D69968D930AAA46000659955",
       "product": "Products/Arx.app",
       "product-type": "application",
-      "dependencies": [{ "kind": "package", "product-name": "BridgeCore" }],
+      "dependencies": [{ "kind": "package", "product-name": "BridgeCore" }, "ArxSectionsWorker"],
       "package-product-members": [{ "product-name": "BridgeCore", "build-phase": { "build-phase": "frameworks" } }],
       "build-phases": [
         "compile-sources",
         "frameworks",
         "resources",
+        { "kind": "copy", "name": "Embed Helper Tools", "bundle-base-path": "executables-directory" },
       ],
       "build-settings": {
         "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
@@ -71,6 +75,29 @@
         "SWIFT_EMIT_LOC_STRINGS": "YES",
         "SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY": "YES",
         "SWIFT_VERSION": "6.0",
+      },
+    }, {
+      "name": "ArxSectionsWorker",
+      "id": "D699690130AAA46400659955",
+      "product": "Products/ArxSectionsWorker",
+      "product-type": "tool",
+      "dependencies": [],
+      "build-phases": [
+        "compile-sources",
+        "frameworks",
+      ],
+      "build-settings": {
+        "CODE_SIGN_ENTITLEMENTS": "SectionsWorkerTool/ArxSectionsWorker.entitlements",
+        "CODE_SIGN_INJECT_BASE_ENTITLEMENTS": "NO",
+        "CODE_SIGN_STYLE": "Automatic",
+        "CURRENT_PROJECT_VERSION": "1",
+        "DEVELOPMENT_TEAM": "CZ72YFTC2R",
+        "ENABLE_HARDENED_RUNTIME": "YES",
+        "MARKETING_VERSION": "1.0",
+        "PRODUCT_NAME": "$(TARGET_NAME)",
+        "SKIP_INSTALL": "YES",
+        "SUPPORTED_PLATFORMS": "macosx",
+        "SDKROOT": "macosx",
       },
     }, {
       "name": "ArxTests",

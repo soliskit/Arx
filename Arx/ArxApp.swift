@@ -19,6 +19,9 @@ struct ArxApp: App {
     if ProcessInfo.processInfo.arguments.contains("--sections-local-worker") {
       exit(ARXSectionWorker.run())
     }
+    if ProcessInfo.processInfo.arguments.contains("--sections-local-helper-fixtures") {
+      exit(SectionsHelperFixtureProbe.run())
+    }
     let experiment =
       ProcessInfo.processInfo.arguments.contains("--sections-local-experiment")
       || ProcessInfo.processInfo.arguments.contains("--sections-local-fixtures")
