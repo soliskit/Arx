@@ -58,7 +58,12 @@
   /// delta 14: --arx-minimal-connection-origin-field-unfocused
   /// renders the verbatim origin-field cell while displacing the
   /// window's first responder to nil, a same-control contrast on
-  /// keyboard focus against the origin-field cell).
+  /// keyboard focus against the origin-field cell);
+  /// delta 15: --arx-minimal-connection-origin-field-late-unfocused
+  /// renders the verbatim origin-field cell while displacing the
+  /// window's first responder only after the first-responder
+  /// descriptor phases complete, a timing contrast against both the
+  /// origin-field cell and the early-unfocused cell).
   /// Running the unchanged strict accessibility audit against each step
   /// separates findings caused by that component from findings the audit
   /// engine or CI environment produces on any app. Never compiled into
@@ -285,6 +290,20 @@
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-connection-origin-field-unfocused")
     }
 
+    /// True only when a control test passes
+    /// --arx-minimal-connection-origin-field-late-unfocused: the detail
+    /// column renders the verbatim delta-12a origin-field cell while
+    /// the window's first responder is displaced to nil only after the
+    /// descriptor phases (0/0.5/1.0s) complete, so its recorded
+    /// descriptor triplet matches the focused origin-field cell while
+    /// the audit itself runs displaced. The per-run descriptor file
+    /// proves the displacement timing; without it the cell is
+    /// invalid, not negative.
+    private var connectionOriginFieldLateUnfocusedRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains(
+        "--arx-minimal-connection-origin-field-late-unfocused")
+    }
+
     /// True only when a control test passes --arx-minimal-fixture-labels:
     /// forces the fixture label tokens even when content mode is on, so
     /// the content+fixture-labels cell of the 2x2 runs with the label
@@ -364,18 +383,21 @@
     }
 
     /// Additive observation (delta 14 repair): record the key window's
-    /// first responder as a STABLE descriptor at the same three short
-    /// delays the displacement contrast issues, for every cell, so the
-    /// focus state near audit time is comparable across runs and
-    /// across the displacement boundary. Observation only, never an
-    /// assertion; the descriptor is a fixed token ("no-key-window",
-    /// "none", or "window" when the window itself is the responder)
-    /// or the responder's class name - never an address, frame or
-    /// label. A focused text field typically reports AppKit's shared
-    /// field editor (NSTextView); displaced focus reports the window
-    /// or no useful responder. Interpretation stays observation: the
-    /// tree's Keyboard Focused attribute remains the per-element
-    /// evidence.
+    /// first responder as a STABLE descriptor at three short delays,
+    /// for every cell, so the focus state near audit time is comparable
+    /// across runs and across the displacement boundary. Observation
+    /// only, never an assertion; the descriptor is a fixed token
+    /// ("no-key-window", "none", or "window" when the window itself is
+    /// the responder) or the responder's class name - never an
+    /// address, frame or label. A focused text field typically reports
+    /// AppKit's shared field editor (NSTextView); displaced focus
+    /// reports the window or no useful responder. Interpretation
+    /// stays observation: the tree's Keyboard Focused attribute
+    /// remains the per-element evidence. The late-unfocused cell
+    /// (delta 15) extends the schedule with three post-displacement
+    /// phases at 1.5/2.0/2.5s, each landing 0.25s after a
+    /// displacement fire, so a successful persistent displacement
+    /// shows as "window" on all three; its file holds six lines.
     private func recordFirstResponderPhases() {
       // Observability repair (c3/c4): the job log never carries the app
       // process's stdout, so the same descriptors are also handed over
@@ -395,7 +417,14 @@
         return FileManager.default.temporaryDirectory
           .appendingPathComponent("arx-responder-phases-\(nonce).txt")
       }()
-      for (index, delay) in [0.0, 0.5, 1.0].enumerated() {
+      // The late-unfocused cell (delta 15) adds three post-fire
+      // observation phases: each lands 0.25s after a displacement
+      // fire (1.25/1.75/2.25s), so it observes the outcome of its
+      // own fire rather than the fire itself. Six lines total.
+      let phaseDelays: [Double] =
+        connectionOriginFieldLateUnfocusedRequested
+        ? [0.0, 0.5, 1.0, 1.5, 2.0, 2.5] : [0.0, 0.5, 1.0]
+      for (index, delay) in phaseDelays.enumerated() {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
           guard let window = NSApplication.shared.keyWindow else {
             print("pre-audit-first-responder-\(index): no-key-window")
@@ -471,6 +500,8 @@
         newClientReadToggleDetail
       } else if connectionOriginFieldUnfocusedRequested {
         connectionOriginFieldUnfocusedDetail
+      } else if connectionOriginFieldLateUnfocusedRequested {
+        connectionOriginFieldLateUnfocusedDetail
       } else {
         plainDetail
       }
@@ -797,6 +828,29 @@
       connectionOriginFieldDetail
         .onAppear {
           for delay in [0.0, 0.5, 1.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+              NSApplication.shared.keyWindow?.makeFirstResponder(nil)
+            }
+          }
+        }
+    }
+
+    /// Delta 15: the verbatim delta-12a origin-field cell with
+    /// keyboard focus displaced off the field at 1.25/1.75/2.25s -
+    /// after the shared descriptor phases at 0/0.5/1.0s - while the
+    /// extended schedule records the responder 0.25s after each fire
+    /// (1.5/2.0/2.5s). The recorded triplet 0-2 is expected to match
+    /// the focused origin-field cell (field editor), and a
+    /// successful persistent displacement shows phases 3-5 as
+    /// "window". The test polls for the complete six-line capture
+    /// before starting the audit, so the audit is sequenced behind
+    /// validated evidence of displacement; the gap between the last
+    /// observation (2.5s) and audit start is unobserved and declared
+    /// as such. onAppear adds no element to the view tree.
+    @ViewBuilder private var connectionOriginFieldLateUnfocusedDetail: some View {
+      connectionOriginFieldDetail
+        .onAppear {
+          for delay in [1.25, 1.75, 2.25] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
               NSApplication.shared.keyWindow?.makeFirstResponder(nil)
             }

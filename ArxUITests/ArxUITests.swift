@@ -740,6 +740,42 @@ final class ArxUITests: XCTestCase {
       artifactName: "minimal-connection-origin-field-unfocused-audit-window.png")
   }
 
+  /// Delta 15: the verbatim delta-12a origin-field cell with keyboard
+  /// focus displaced at 1.25/1.75/2.25s - after the shared descriptor
+  /// phases - while the extended schedule observes the responder
+  /// 0.25s after each fire (1.5/2.0/2.5s). This test POLLS for the
+  /// complete six-line capture with a bounded deadline BEFORE running
+  /// the audit, so the audit is sequenced behind validated evidence
+  /// of a successful persistent displacement: phases 0-2 are expected
+  /// to read _SystemTextFieldFieldEditor (matching the focused cell)
+  /// and phases 3-5 window, and the capture gate enforces that exact
+  /// pattern. An incomplete or malformed capture by the deadline is
+  /// INVALID, and a complete capture whose tokens miss that pattern
+  /// is INVALID too (invalid-pattern, printed with the raw observed
+  /// tokens); either way the audit still runs, but no
+  /// displacement-sequenced claim attaches to it. Declared gap: focus
+  /// changes between the last observation (2.5s) and the audit's own
+  /// start are unobserved; no responder-at-audit-time claim is made.
+  /// Bounded readings, hypotheses only: if the Parent/Child mismatch
+  /// appears in a valid late-unfocused cell, first-second focus
+  /// history still co-occurs with the mismatch when the audit ran
+  /// after validated displacement, weakening audit-time focus as the
+  /// discriminating variable in this configuration; if it does not
+  /// appear, both displacement timings share the absence, consistent
+  /// with (not proving) audit-time focus being the associate. One
+  /// cell, one run: no mechanism, no exclusion, no recurrence claim.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureConnectionOriginFieldLateUnfocused() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-connection-origin-field-late-unfocused", "--arx-minimal-real-labels",
+        "--arx-minimal-probes", "--arx-minimal-axgroup", "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-connection-origin-field-late-unfocused-audit-window.png",
+      expectedPhaseLines: 6,
+      awaitCompletePhases: true)
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any
@@ -747,7 +783,10 @@ final class ArxUITests: XCTestCase {
   /// audit's capture), then run the SAME strict audit handler as the
   /// full-app audit and assert on its collected issues. Observations are
   /// never assertions.
-  private func runMinimalFixtureAudit(extraArguments: [String], artifactName: String) throws {
+  private func runMinimalFixtureAudit(
+    extraArguments: [String], artifactName: String,
+    expectedPhaseLines: Int = 3, awaitCompletePhases: Bool = false
+  ) throws {
     app.terminate()
     app = XCUIApplication()
     app.launchArguments = ["--bridge-fixtures", "--arx-minimal-fixture"] + extraArguments
@@ -804,16 +843,61 @@ final class ArxUITests: XCTestCase {
     try? FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
     try? auditPNG.write(to: artifacts.appendingPathComponent(artifactName))
 
-    let issues = try strictAuditIssueLines(application)
-    // Bounded handoff read (c4). Placed after the audit, whose
-    // wall-clock duration exceeds the 1.0s final phase delay in
-    // practice; a file still short at read time yields INVALID-partial,
-    // never partial evidence. The read is bounded at the byte level:
-    // at most limit+1 bytes are read, and anything longer, malformed
-    // or mis-encoded is INVALID. The audit above is unchanged; these
-    // lines are observation, never assertions.
-    printResponderPhases(from: phasesFileCandidates)
+    let issues: [String]
+    if awaitCompletePhases {
+      // Sequenced capture (delta 15): poll for the complete validated
+      // capture with a bounded deadline BEFORE the audit runs, so the
+      // audit is gated on observed displacement, not on a schedule
+      // assumption. A deadline miss is INVALID, never negative.
+      printResponderPhasesAwaited(from: phasesFileCandidates, expectedLines: expectedPhaseLines)
+      issues = try strictAuditIssueLines(application)
+    } else {
+      issues = try strictAuditIssueLines(application)
+      // Bounded handoff read (c4). Placed after the audit, whose
+      // wall-clock duration exceeds the 1.0s final phase delay in
+      // practice; a file still short at read time yields INVALID-partial,
+      // never partial evidence. The read is bounded at the byte level:
+      // at most limit+1 bytes are read, and anything longer, malformed
+      // or mis-encoded is INVALID. The audit above is unchanged; these
+      // lines are observation, never assertions.
+      printResponderPhases(from: phasesFileCandidates)
+    }
     XCTAssertTrue(issues.isEmpty, issues.joined(separator: "\n---\n"))
+  }
+
+  /// Reads the handoff file once, enforcing the byte-level bound and
+  /// the exact line grammar. Returns the validated lines, or nil with
+  /// the INVALID marker printed. Shared by the post-audit read and
+  /// the pre-audit awaited capture.
+  private func readResponderPhases(from candidates: [URL], expectedLines: Int) -> [String]? {
+    guard let file = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+      let handle = try? FileHandle(forReadingFrom: file)
+    else {
+      print("pre-audit-first-responder: invalid-missing")
+      return nil
+    }
+    defer { try? handle.close() }
+    let data = handle.readData(ofLength: Self.phasesReadLimit + 1)
+    guard data.count <= Self.phasesReadLimit else {
+      print("pre-audit-first-responder: invalid-oversized")
+      return nil
+    }
+    guard let text = String(data: data, encoding: .utf8) else {
+      print("pre-audit-first-responder: invalid-encoding")
+      return nil
+    }
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: false).dropLast()
+    let valid =
+      lines.count == expectedLines
+      && lines.enumerated().allSatisfy { index, line in
+        line.hasPrefix("pre-audit-first-responder-\(index): ")
+          && !line.dropFirst("pre-audit-first-responder-\(index): ".count).isEmpty
+      }
+    guard valid else {
+      print("pre-audit-first-responder: invalid-partial")
+      return nil
+    }
+    return Array(lines)
   }
 
   /// Prints the three DEBUG responder-phase descriptors the app handed
@@ -828,34 +912,71 @@ final class ArxUITests: XCTestCase {
   private static let phasesReadLimit = 1024
 
   private func printResponderPhases(from candidates: [URL]) {
+    guard let lines = readResponderPhases(from: candidates, expectedLines: 3) else { return }
+    for line in lines { print(line) }
+  }
+
+  /// Awaited variant for the late-displacement cell (delta 15): polls
+  /// for the complete six-line capture every 50ms up to a bounded
+  /// 10s deadline, so the audit is sequenced behind validated
+  /// displacement evidence. The gate is semantic, not grammar only:
+  /// a complete capture is accepted only when phases 0-2 all read
+  /// the shared field editor (_SystemTextFieldFieldEditor, matching
+  /// the focused origin-field cell) and phases 3-5 all read window
+  /// (the persistent displacement). A complete capture with any
+  /// other content is INVALID: the invalid-pattern marker prints
+  /// together with the raw observed tokens, so the failure carries
+  /// its evidence and a wrong-pattern capture can never pass as
+  /// validated displacement. A deadline miss prints INVALID once,
+  /// never a partial reading. Poll iterations re-read from
+  /// empty/missing states silently; only the terminal state prints.
+  /// Only the delta-15 cell uses this path.
+  private func printResponderPhasesAwaited(from candidates: [URL], expectedLines: Int) {
+    let expectedTokens = [
+      "_SystemTextFieldFieldEditor", "_SystemTextFieldFieldEditor",
+      "_SystemTextFieldFieldEditor", "window", "window", "window",
+    ]
+    let deadline = Date().addingTimeInterval(10)
+    while Date() < deadline {
+      if let lines = readResponderPhasesQuietly(from: candidates, expectedLines: expectedLines) {
+        let tokens = lines.enumerated().map { index, line in
+          String(line.dropFirst("pre-audit-first-responder-\(index): ".count))
+        }
+        if tokens == expectedTokens {
+          for line in lines { print(line) }
+        } else {
+          print("pre-audit-first-responder: invalid-pattern")
+          for (index, token) in tokens.enumerated() {
+            print("invalid-pattern-observed-\(index): \(token)")
+          }
+        }
+        return
+      }
+      Thread.sleep(forTimeInterval: 0.05)
+    }
+    print("pre-audit-first-responder: invalid-incomplete")
+  }
+
+  /// Silent single attempt used by the polling loop: identical bound
+  /// and grammar to readResponderPhases, but prints nothing on a
+  /// miss so a partially written file mid-poll is not yet INVALID.
+  private func readResponderPhasesQuietly(from candidates: [URL], expectedLines: Int) -> [String]? {
     guard let file = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
       let handle = try? FileHandle(forReadingFrom: file)
-    else {
-      print("pre-audit-first-responder: invalid-missing")
-      return
-    }
+    else { return nil }
     defer { try? handle.close() }
     let data = handle.readData(ofLength: Self.phasesReadLimit + 1)
-    guard data.count <= Self.phasesReadLimit else {
-      print("pre-audit-first-responder: invalid-oversized")
-      return
-    }
-    guard let text = String(data: data, encoding: .utf8) else {
-      print("pre-audit-first-responder: invalid-encoding")
-      return
-    }
+    guard data.count <= Self.phasesReadLimit,
+      let text = String(data: data, encoding: .utf8)
+    else { return nil }
     let lines = text.split(separator: "\n", omittingEmptySubsequences: false).dropLast()
     let valid =
-      lines.count == 3
+      lines.count == expectedLines
       && lines.enumerated().allSatisfy { index, line in
         line.hasPrefix("pre-audit-first-responder-\(index): ")
           && !line.dropFirst("pre-audit-first-responder-\(index): ".count).isEmpty
       }
-    guard valid else {
-      print("pre-audit-first-responder: invalid-partial")
-      return
-    }
-    for line in lines { print(line) }
+    return valid ? Array(lines) : nil
   }
 
   /// Runs the strict accessibility audit (every issue type, no filters) and
