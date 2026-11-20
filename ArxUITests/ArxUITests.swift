@@ -917,6 +917,57 @@ final class ArxUITests: XCTestCase {
       observedTargetIdentifier: "bridge-status-pair-target")
   }
 
+  /// Delta 19 of the reduction ladder: the height discriminator. The
+  /// cell content is the delta-8b texts cell verbatim plus a trailing
+  /// 1600-point clear filler, so total content height exceeds any
+  /// window the screen can hold and the only intended difference from
+  /// the passing delta-8b cell in this run is content height. The
+  /// window may auto-grow to fit content (contentMinSize), so the
+  /// overflow condition is evidenced by the recorded pre-audit window
+  /// frame, never assumed: a window frame that fits this content makes
+  /// the run invalid, not negative. Pre-registered readings,
+  /// hypotheses only: if the identical bridge status text is flagged
+  /// here while passing in delta 8b, content height is implicated for
+  /// these cells; if it passes here, content height alone does not
+  /// reproduce the flag in this run and a single negative is not a
+  /// causal exclusion. A single run does not establish recurrence.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureHeightOverflow() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-height-overflow",
+        "--arx-minimal-real-labels",
+        "--arx-minimal-probes",
+        "--arx-minimal-axgroup",
+        "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-height-overflow-audit-window.png",
+      observedTargetIdentifier: "bridge-status")
+  }
+
+  /// Delta 20 of the reduction ladder: the banner capsule variant. The
+  /// full content sidebar from delta 6a with only the banner's capsule
+  /// background removed; every other modifier is identical. The banner
+  /// line has been flagged in every fixture replica that renders it
+  /// and in the full app, at the same small frame. Pre-registered
+  /// readings, hypotheses only: if the capsule-free banner passes here
+  /// while the delta-6a control fails in the same run, the capsule
+  /// background is implicated; if it is still flagged, the capsule is
+  /// not the cause in this run and a single negative is not a causal
+  /// exclusion. A single run does not establish recurrence.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureSidebarBannerNoCapsule() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: [
+        "--arx-minimal-sidebar-banner-no-capsule",
+        "--arx-minimal-real-labels",
+        "--arx-minimal-probes",
+        "--arx-minimal-axgroup",
+        "--arx-dump-view-hierarchy",
+      ],
+      artifactName: "minimal-sidebar-banner-no-capsule-audit-window.png")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any

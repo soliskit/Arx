@@ -361,6 +361,24 @@
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-bridge-status-groupbox")
     }
 
+    /// True only when a control test passes --arx-minimal-height-overflow:
+    /// the texts cell content (title, status, revoke caption) plus a
+    /// trailing clear filler taller than any window the screen can
+    /// hold, isolating content height from the group-box stack. The
+    /// status text and its position are identical to delta 8b.
+    private var heightOverflowRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-height-overflow")
+    }
+
+    /// True only when a control test passes
+    /// --arx-minimal-sidebar-banner-no-capsule: the full content
+    /// sidebar with the banner's capsule background removed and every
+    /// other modifier identical, isolating the capsule from the banner
+    /// text. Matched against the delta-6a sidebar-content cell.
+    private var bannerNoCapsuleRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-sidebar-banner-no-capsule")
+    }
+
     /// True only when a control test passes --arx-minimal-fixture-labels:
     /// forces the fixture label tokens even when content mode is on, so
     /// the content+fixture-labels cell of the 2x2 runs with the label
@@ -513,7 +531,7 @@
     }
 
     @ViewBuilder private var sidebarColumn: some View {
-      if sidebarContentActive {
+      if sidebarContentActive || bannerNoCapsuleRequested {
         contentSidebar
       } else {
         plainSidebar
@@ -531,6 +549,8 @@
         boxesDetail
       } else if detailTextsRequested {
         textsDetail
+      } else if heightOverflowRequested {
+        heightOverflowDetail
       } else if detailBoxConnectionRequested {
         connectionBoxDetail
       } else if detailBoxNewClientRequested {
@@ -733,6 +753,27 @@
       .navigationTitle("Fixture Sharing")
     }
 
+    /// The fixture banner line, verbatim from ContentView.swift:17-23.
+    /// Delta 20 removes only the capsule background when the
+    /// --arx-minimal-sidebar-banner-no-capsule cell asks for it; every
+    /// other modifier and the existing cells' rendering are unchanged.
+    @ViewBuilder private var fixtureBanner: some View {
+      if bannerNoCapsuleRequested {
+        Text("Fixture data - no real Reminders access")
+          .font(.caption)
+          .foregroundStyle(Color(nsColor: .labelColor))
+          .padding(.horizontal, 6)
+          .padding(.vertical, 2)
+      } else {
+        Text("Fixture data - no real Reminders access")
+          .font(.caption)
+          .foregroundStyle(Color(nsColor: .labelColor))
+          .padding(.horizontal, 6)
+          .padding(.vertical, 2)
+          .background(.background, in: .capsule)
+      }
+    }
+
     /// Faithful replica of the full app's fixture-mode sidebar
     /// (ContentView.swift:17-54, connected fixture path): the banner
     /// capsule, the grant-list rows with their labels and identifiers,
@@ -740,12 +781,7 @@
     /// audit; no model, store or notification is involved.
     @ViewBuilder private var contentSidebar: some View {
       VStack(alignment: .leading, spacing: 12) {
-        Text("Fixture data - no real Reminders access")
-          .font(.caption)
-          .foregroundStyle(Color(nsColor: .labelColor))
-          .padding(.horizontal, 6)
-          .padding(.vertical, 2)
-          .background(.background, in: .capsule)
+        fixtureBanner
         List(Self.fixtureLists, selection: $highlighted) { list in
           Toggle(
             isOn: Binding(
@@ -818,6 +854,35 @@
         bridgeTitle
         bridgeStatus
         revokeCaption
+      }
+      .padding(24)
+      .frame(maxWidth: 760, alignment: .leading)
+      .navigationTitle("Sharing")
+    }
+
+    /// Delta 19 of the ladder: the height discriminator. Identical to
+    /// the delta-8b texts cell (title, status, revoke caption, same
+    /// family, same positions) plus a trailing clear filler tall enough
+    /// that total content height exceeds any window the screen can
+    /// hold, so the only intended difference from delta 8b is content
+    /// height. The window uses contentMinSize sizing and may grow to
+    /// fit content, so the overflow condition is evidenced, not
+    /// assumed: the filler alone is 1600 points, and the harness
+    /// records the actual pre-audit window frame for every cell. If
+    /// that recorded frame ever shows the window fitting this content,
+    /// the cell did not discriminate overflow and the run is invalid,
+    /// not negative. Bounded readings, hypotheses only: if the
+    /// identical status text is flagged here while delta 8b passes in
+    /// the same run, content height is implicated for these cells; if
+    /// it passes, content height alone does not reproduce the flag
+    /// here, and a single negative is not a causal exclusion. A single
+    /// run does not establish recurrence.
+    @ViewBuilder private var heightOverflowDetail: some View {
+      VStack(alignment: .leading, spacing: 20) {
+        bridgeTitle
+        bridgeStatus
+        revokeCaption
+        Color.clear.frame(height: 1600)
       }
       .padding(24)
       .frame(maxWidth: 760, alignment: .leading)
