@@ -64,9 +64,15 @@ static int output(NSDictionary *result, int status) {
     }
     return writeData(data, status);
 }
+// Fixed-refusal helper, called only from the real-reader branch below; the
+// fixture build compiles that branch out, so the guard keeps -Werror
+// -Wunused-function clean in both configurations. Same treatment as
+// permissionDetail.
+#if !defined(ARX_SECTION_READER_FIXTURES)
 static int refused(NSString *reason) {
     return output(@{ @"state": @"unknown", @"reason": reason }, 77);
 }
+#endif
 // Fixed permission-status tokens only; the raw enum never crosses the stream.
 #if !defined(ARX_SECTION_READER_FIXTURES)
 static NSString *permissionDetail(EKAuthorizationStatus status) {
