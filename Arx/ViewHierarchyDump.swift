@@ -19,6 +19,21 @@
 /// receipts. Absent a nonce, the stdout print still serves local runs.
 /// There is no workflow change.
 ///
+/// c19 writer stages: c18 showed the file can be absent with the cause
+/// unobservable. The writer now records its own stages in-band through
+/// the same file - but ONLY after the FULL existing authorization
+/// (fixture store AND launch flag AND latch AND valid nonce) evaluates
+/// true; a launch failing any element returns silently exactly as
+/// before and its stage stays UNKNOWN, never observed through a safety
+/// relaxation. Stages: "entered" (authorized, capture scheduled),
+/// "after-sleep" (the delayed capture task ran), "incomplete:
+/// window-not-found" (the owned-window guard failed - terminal), and
+/// "stage: complete" as a header of the full block. Last-write-wins,
+/// atomic. A file-absent read then means only {never invoked, gate
+/// element false, write-level failure}; the same-process geometry
+/// receipt landing is an association that bounds, not excludes, the
+/// write-failure branch.
+///
 /// Fail-closed: it prints nothing unless ALL of the following hold - a DEBUG
 /// build, the runtime model is the fixture store (no EventKit store exists),
 /// and the explicit --arx-dump-view-hierarchy argument is present (only the
@@ -48,17 +63,34 @@ enum ViewHierarchyDump {
         !requested
       else { return }
       requested = true
+      // c19: the stage file exists only when the full authorization
+      // above passed AND the nonce is valid; every write below is
+      // behind this check.
+      let dumpFile: URL? = {
+        guard let nonce = ProcessInfo.processInfo.environment["ARX_DUMP_NONCE"],
+          nonce.range(of: "^[0-9A-Fa-f-]{36}$", options: .regularExpression) != nil
+        else { return nil }
+        return FileManager.default.temporaryDirectory
+          .appendingPathComponent("arx-dump-\(nonce).txt")
+      }()
+      writeStageBlock(["stage: entered"], to: dumpFile)
       Task { @MainActor in
         try? await Task.sleep(nanoseconds: 2_000_000_000)
+        writeStageBlock(["stage: after-sleep"], to: dumpFile)
         guard let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }),
           let content = window.contentView
-        else { return }
+        else {
+          writeStageBlock(["stage: incomplete", "incomplete: window-not-found"], to: dumpFile)
+          return
+        }
         var lines = [
           "schema: arx-view-dump/1",
+          "stage: complete",
           "captured: \(ISO8601DateFormatter().string(from: Date()))",
           "screen: \(NSScreen.main?.frame ?? .zero)",
           "window: \(window.frame)",
-          "reference-frames: root (62.0, 142.0, 900.0, 472.0) sidebar (62.0, 142.0, 260.0, 472.0)",
+          "ref-constants: root900 (62,142,900,472) sidebar260 (62,142,260,472)"
+            + " (hardcoded match constants from an earlier run, not measurements)",
         ]
         var remaining = 300
         var depthCapped = false
@@ -76,18 +108,25 @@ enum ViewHierarchyDump {
         // (same channel family as the responder phases and geometry
         // receipts). The block is bounded by construction (300-node and
         // depth-16 caps) and written atomically.
-        if let nonce = ProcessInfo.processInfo.environment["ARX_DUMP_NONCE"],
-          nonce.range(of: "^[0-9A-Fa-f-]{36}$", options: .regularExpression) != nil
-        {
-          let file = FileManager.default.temporaryDirectory
-            .appendingPathComponent("arx-dump-\(nonce).txt")
-          try? block.write(to: file, atomically: true, encoding: .utf8)
+        if let dumpFile {
+          try? block.write(to: dumpFile, atomically: true, encoding: .utf8)
         }
       }
     #endif
   }
 
   #if DEBUG
+    /// c19: a minimal delimited block carrying only fixed-vocabulary
+    /// stage tokens - never dynamic text. Best-effort: a failed write
+    /// reads file-absent on the test side, inside the registered bound.
+    private static func writeStageBlock(_ stageLines: [String], to file: URL?) {
+      guard let file else { return }
+      let block =
+        "ARX-VIEW-DUMP-v1-BEGIN\nschema: arx-view-dump/1\n"
+        + stageLines.joined(separator: "\n") + "\nARX-VIEW-DUMP-v1-END\n"
+      try? block.write(to: file, atomically: true, encoding: .utf8)
+    }
+
     private static let flaggedFrames: [(name: String, rect: CGRect)] = [
       ("root900", CGRect(x: 62, y: 142, width: 900, height: 472)),
       ("sidebar260", CGRect(x: 62, y: 142, width: 260, height: 472)),

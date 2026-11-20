@@ -395,6 +395,8 @@
     @State private var scrollStackFrame: CGFloat?
     @State private var scrollFillerHeight: CGFloat?
     @State private var scrollGeometrySeq = 0
+    @State private var scrollFirstY: CGFloat?
+    @State private var scrollLastY: CGFloat?
 
     /// c18 preference keys. Delivery via preference + onPreferenceChange
     /// differs from the @State/onAppear path; a frame(in:) value under
@@ -407,6 +409,25 @@
       }
     }
     private struct ScrollFillerHeightKey: PreferenceKey {
+      static let defaultValue: CGFloat? = nil
+      static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = nextValue() ?? value
+      }
+    }
+    /// c19 leaf-span endpoints: the laid-out minY of the first leaf
+    /// (bridgeTitle) and maxY of the last leaf (revokeCaption in the
+    /// fit half, the 1600-point filler in the overflow half) in the
+    /// same named space. The span covers leaf extents only - it
+    /// excludes the stack's 24-point padding - and is a comparative
+    /// site discriminator in the SAME measurement family as the stack
+    /// reader, never independent causal proof.
+    private struct ScrollFirstLeafKey: PreferenceKey {
+      static let defaultValue: CGFloat? = nil
+      static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = nextValue() ?? value
+      }
+    }
+    private struct ScrollLastLeafKey: PreferenceKey {
       static let defaultValue: CGFloat? = nil
       static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
         value = nextValue() ?? value
@@ -1007,15 +1028,36 @@
       ScrollView {
         VStack(alignment: .leading, spacing: 20) {
           bridgeTitle
+            .background(
+              GeometryReader { proxy in
+                Color.clear.preference(
+                  key: ScrollFirstLeafKey.self,
+                  value: proxy.frame(in: .named("scrollPair")).minY)
+              }
+            )
           bridgeStatus
           revokeCaption
+            .background(
+              GeometryReader { proxy in
+                Color.clear.preference(
+                  key: ScrollLastLeafKey.self,
+                  value:
+                    scrollOverflowRequested
+                    ? nil : proxy.frame(in: .named("scrollPair")).maxY)
+              }
+            )
           if scrollOverflowRequested {
             Color.clear.frame(height: 1600)
               .background(
                 GeometryReader { proxy in
-                  Color.clear.preference(
-                    key: ScrollFillerHeightKey.self,
-                    value: proxy.frame(in: .named("scrollPair")).height)
+                  Color.clear
+                    .preference(
+                      key: ScrollFillerHeightKey.self,
+                      value: proxy.frame(in: .named("scrollPair")).height
+                    )
+                    .preference(
+                      key: ScrollLastLeafKey.self,
+                      value: proxy.frame(in: .named("scrollPair")).maxY)
                 }
               )
           }
@@ -1050,14 +1092,24 @@
         scrollFillerHeight = $0
         writeScrollGeometryReceipt()
       }
+      .onPreferenceChange(ScrollFirstLeafKey.self) {
+        scrollFirstY = $0
+        writeScrollGeometryReceipt()
+      }
+      .onPreferenceChange(ScrollLastLeafKey.self) {
+        scrollLastY = $0
+        writeScrollGeometryReceipt()
+      }
     }
 
     /// c18: the receipt is written on EVERY measurement event, whether
     /// or not all values have landed; the write sequence number records
-    /// the channel's last-write-wins history. Grammar:
+    /// the channel's last-write-wins history. Grammar (c19 adds the
+    /// signed comparative trio firstY/lastY/span):
     /// scroll-geometry: cell=<fit|overflow> seq=<n>
     /// viewport=<v|pending> contentSize=<s|pending>
     /// stackFrame=<f|pending> filler=<h|absent|pending>
+    /// firstY=<y|pending> lastY=<y|pending> span=<y|pending>
     /// contentSize is the original background-GeometryReader proxy.size
     /// value delivered via @State/onAppear; stackFrame is the same
     /// reader's frame(in: "scrollPair").height delivered via preference
@@ -1071,13 +1123,25 @@
     private func writeScrollGeometryReceipt() {
       scrollGeometrySeq += 1
       func field(_ value: CGFloat?) -> String { value.map { "\($0)" } ?? "pending" }
+      // c19: span over leaf extents (excludes the stack padding);
+      // negative coordinates and a negative span are valid
+      // measurements, printed as observed - never grammar failures.
+      let span: String
+      if let firstY = scrollFirstY, let lastY = scrollLastY {
+        span = "\(lastY - firstY)"
+      } else {
+        span = "pending"
+      }
       Self.writeGeometryReceipt(
         "scroll-geometry: cell=\(scrollOverflowRequested ? "overflow" : "fit")"
           + " seq=\(scrollGeometrySeq)"
           + " viewport=\(field(scrollViewportHeight))"
           + " contentSize=\(field(scrollContentHeight))"
           + " stackFrame=\(field(scrollStackFrame))"
-          + " filler=\(scrollOverflowRequested ? field(scrollFillerHeight) : "absent")",
+          + " filler=\(scrollOverflowRequested ? field(scrollFillerHeight) : "absent")"
+          + " firstY=\(field(scrollFirstY))"
+          + " lastY=\(field(scrollLastY))"
+          + " span=\(span)",
         to: Self.geometryFile)
     }
 

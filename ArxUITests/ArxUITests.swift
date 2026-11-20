@@ -1194,18 +1194,28 @@ final class ArxUITests: XCTestCase {
     // malformed or inequality-violating one fails the test below, so
     // the cell is INVALID, never a fits/overflow finding.
     if let geometryReceiptCell {
-      // Fail-closed: an invalid receipt fails the test, so an invalid
-      // run can never read as a clean audit negative.
-      if !printGeometryReceipt(from: geometryFileCandidates, expectedCell: geometryReceiptCell) {
-        XCTFail("scroll-geometry: INVALID")
-      }
-      // c18: the registered reading of the scroll pair also requires
-      // the COMPLETE view-hierarchy dump, delivered through the
-      // nonce-named file (the app's stdout does not reach the retained
-      // job log). Missing, over-cap, mis-encoded or partial is INVALID,
+      // c19: collect ALL evidence before ANY failure. The suite sets
+      // continueAfterFailure=false, so in c18 a failing fit-half
+      // receipt aborted the test before its dump read ran - the dump
+      // state went unobserved. Both validators print their full
+      // evidence (stage-tagged values / stage blocks) and only return
+      // a verdict; the failures fire afterwards. Fail-closed: an
+      // invalid receipt or dump fails the test, so an invalid run can
+      // never read as a clean audit negative; missing, over-cap,
+      // mis-encoded, incomplete or truncated dump evidence is INVALID,
       // never an absent-hierarchy finding.
-      if !printViewHierarchyDump(from: dumpFileCandidates) {
-        XCTFail("arx-view-dump: INVALID")
+      let receiptOK = printGeometryReceipt(
+        from: geometryFileCandidates, expectedCell: geometryReceiptCell)
+      let dumpOK = printViewHierarchyDump(from: dumpFileCandidates)
+      // ONE combined failure: the suite sets continueAfterFailure=false,
+      // so sequential XCTFails would record only the first gate and
+      // leave the second verdict in stdout alone (exactly the c18
+      // fit-half mislabel c19 exists to close). Every failed gate is
+      // named in the single record; the issue assertion stays last.
+      if !receiptOK || !dumpOK {
+        XCTFail(
+          "scroll-pair: INVALID receipt=\(receiptOK ? "valid" : "invalid")"
+            + " dump=\(dumpOK ? "valid" : "invalid")")
       }
     }
     XCTAssertTrue(issues.isEmpty, issues.joined(separator: "\n---\n"))
@@ -1262,11 +1272,12 @@ final class ArxUITests: XCTestCase {
     for line in lines { print(line) }
   }
 
-  /// Delta 21 geometry receipt read, fail-closed (c18 grammar): exactly
+  /// Delta 21 geometry receipt read, fail-closed (c19 grammar): exactly
   /// one line of the shape
   /// "scroll-geometry: cell=<expected> seq=<n> viewport=<v|pending>
   /// contentSize=<s|pending> stackFrame=<f|pending>
-  /// filler=<h|absent|pending>"
+  /// filler=<h|absent|pending> firstY=<y|pending> lastY=<y|pending>
+  /// span=<y|pending>"
   /// with the registered inequality enforced numerically on the
   /// PRE-REGISTERED PRIMARY, stackFrame (the preference-key delivered
   /// frame measurement): the fit half at most the measured viewport,
@@ -1283,7 +1294,15 @@ final class ArxUITests: XCTestCase {
   /// lost. Anything missing, malformed, stale, extra, pending,
   /// calibration-less or inequality-violating returns false so the
   /// caller fails the test - INVALID, never a fits/overflow finding.
-  /// Nothing here asserts the declared 300-point frame.
+  /// Nothing here asserts the declared 300-point frame. c19: the
+  /// comparative trio firstY/lastY/span is SIGNED (an optional leading
+  /// minus) - a negative coordinate or span is a valid measurement and
+  /// itself evidence - with a finite check only and NO positivity
+  /// requirement; the enforced fields (viewport/stackFrame) keep their
+  /// strict digits-and-dots grammar and finite/positive guards,
+  /// unbroadened. The trio shares the stack reader's coordinate space
+  /// and delivery family: a site discriminator, never independent
+  /// causal proof.
   private func printGeometryReceipt(from candidates: [URL], expectedCell: String) -> Bool {
     func invalid(_ stage: String, _ detail: String) -> Bool {
       print("scroll-geometry: invalid-\(stage) \(detail)")
@@ -1318,7 +1337,17 @@ final class ArxUITests: XCTestCase {
     func isPendingOrNumeric(_ value: Substring) -> Bool {
       value == "pending" || isNumeric(value)
     }
-    guard tokens.count == 7,
+    // Signed variant for the comparative coordinate trio: an optional
+    // leading minus, then digits and dots. A negative endpoint or span
+    // is a valid measurement, never malformed.
+    func isSignedNumeric(_ value: Substring) -> Bool {
+      let digits = value.hasPrefix("-") ? value.dropFirst() : value[...]
+      return !digits.isEmpty && digits.allSatisfy { $0.isNumber || $0 == "." }
+    }
+    func isPendingOrSigned(_ value: Substring) -> Bool {
+      value == "pending" || isSignedNumeric(value)
+    }
+    guard tokens.count == 10,
       tokens[0] == "scroll-geometry:",
       let cell = field(1, "cell"),
       !cell.isEmpty && cell.allSatisfy({ $0.isLetter && $0.isLowercase }),
@@ -1328,7 +1357,10 @@ final class ArxUITests: XCTestCase {
       let contentSizeToken = field(4, "contentSize"), isPendingOrNumeric(contentSizeToken),
       let stackFrameToken = field(5, "stackFrame"), isPendingOrNumeric(stackFrameToken),
       let fillerToken = field(6, "filler"),
-      isPendingOrNumeric(fillerToken) || fillerToken == "absent"
+      isPendingOrNumeric(fillerToken) || fillerToken == "absent",
+      let firstYToken = field(7, "firstY"), isPendingOrSigned(firstYToken),
+      let lastYToken = field(8, "lastY"), isPendingOrSigned(lastYToken),
+      let spanToken = field(9, "span"), isPendingOrSigned(spanToken)
     else { return invalid("grammar", "(raw: \(text))") }
     guard let seq = Int(seqToken), seq >= 1,
       let viewport = Double(viewportToken),
@@ -1340,6 +1372,13 @@ final class ArxUITests: XCTestCase {
     guard viewport.isFinite, stackFrame.isFinite, viewport > 0, stackFrame > 0
     else {
       return invalid("finite", "(viewport=\(viewportToken) stackFrame=\(stackFrameToken))")
+    }
+    // Comparative trio: finite check only - negatives are valid
+    // measurements and are printed as observed, never rejected.
+    for (name, token) in [("firstY", firstYToken), ("lastY", lastYToken), ("span", spanToken)]
+    where token != "pending" {
+      guard let value = Double(token), value.isFinite
+      else { return invalid("finite", "(\(name)=\(token))") }
     }
     // Calibration presence, fail-closed: the overflow half must carry a
     // finite, positive filler measurement; the fit half exactly
@@ -1383,11 +1422,12 @@ final class ArxUITests: XCTestCase {
   private static let dumpReadLimit = 32768
 
   private func printViewHierarchyDump(from candidates: [URL]) -> Bool {
-    func invalid(_ stage: String) -> Bool {
-      print("arx-view-dump: invalid-\(stage)")
+    func invalid(_ stage: String, _ detail: String = "") -> Bool {
+      print("arx-view-dump: invalid-\(stage)\(detail.isEmpty ? "" : " \(detail)")")
       return false
     }
     var sawPartial = false
+    var lastStage: String?
     let deadline = Date().addingTimeInterval(10)
     while Date() < deadline {
       if let file = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
@@ -1407,22 +1447,41 @@ final class ArxUITests: XCTestCase {
           Thread.sleep(forTimeInterval: 0.05)
           continue
         }
-        // Complete means complete: the block's own summary line must
-        // be present, and a node- or depth-truncated capture is
-        // INVALID, never accepted as the complete hierarchy.
-        guard
-          let summary = text.split(separator: "\n").first(where: {
-            $0.hasPrefix("nodes: ")
-          })
-        else { return invalid("partial") }
-        guard !summary.contains("node-truncated: true"),
-          !summary.contains("depth-truncated: true")
-        else { return invalid("truncated") }
-        print(text)
-        return true
+        let blockLines = text.split(separator: "\n")
+        let stage = blockLines.first(where: { $0.hasPrefix("stage: ") })
+          .map { String($0.dropFirst("stage: ".count)) }
+        // c19: only a "stage: complete" block can be the hierarchy.
+        if stage == "complete" {
+          // Complete means complete: the block's own summary line must
+          // be present, and a node- or depth-truncated capture is
+          // INVALID, never accepted as the complete hierarchy.
+          guard let summary = blockLines.first(where: { $0.hasPrefix("nodes: ") })
+          else { return invalid("partial") }
+          guard !summary.contains("node-truncated: true"),
+            !summary.contains("depth-truncated: true")
+          else { return invalid("truncated") }
+          print(text)
+          return true
+        }
+        // A terminal incomplete block (the writer stopped on a guard):
+        // fail with its stage evidence printed.
+        if let incomplete = blockLines.first(where: { $0.hasPrefix("incomplete: ") }) {
+          return invalid("incomplete", "\(stage ?? "-") \(incomplete)")
+        }
+        // A non-terminal stage block (entered / after-sleep): the
+        // writer may still overwrite it, so record and keep polling.
+        if let stage { lastStage = stage }
+        Thread.sleep(forTimeInterval: 0.05)
+        continue
       }
       Thread.sleep(forTimeInterval: 0.05)
     }
+    // Deadline: a writer last seen at a non-terminal stage reads
+    // stalled with that stage; a file never seen reads missing (the
+    // registered bound: never invoked, gate element false, or
+    // write-level failure - the same-process geometry receipt is an
+    // association that bounds, not excludes, the last branch).
+    if let lastStage { return invalid("stalled", lastStage) }
     return invalid(sawPartial ? "partial" : "missing")
   }
 
