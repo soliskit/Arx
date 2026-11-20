@@ -304,6 +304,25 @@
         "--arx-minimal-connection-origin-field-late-unfocused")
     }
 
+    /// True only when a control test passes
+    /// --arx-minimal-caption-context-plain: the detail column renders
+    /// the single caption text of the matched caption-context pair in
+    /// its plain (no GroupBox) context half, at fixed coordinates
+    /// shared with the GroupBox half.
+    private var captionContextPlainRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-caption-context-plain")
+    }
+
+    /// True only when a control test passes
+    /// --arx-minimal-caption-context-groupbox: the detail column
+    /// renders the SAME caption text of the matched caption-context
+    /// pair inside GroupBox("Connection") containment, the pair's
+    /// GroupBox context half, with the text at the same fixed
+    /// coordinates as the plain half.
+    private var captionContextGroupBoxRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-caption-context-groupbox")
+    }
+
     /// True only when a control test passes --arx-minimal-fixture-labels:
     /// forces the fixture label tokens even when content mode is on, so
     /// the content+fixture-labels cell of the 2x2 runs with the label
@@ -502,6 +521,10 @@
         connectionOriginFieldUnfocusedDetail
       } else if connectionOriginFieldLateUnfocusedRequested {
         connectionOriginFieldLateUnfocusedDetail
+      } else if captionContextPlainRequested {
+        captionContextPlainDetail
+      } else if captionContextGroupBoxRequested {
+        captionContextGroupBoxDetail
       } else {
         plainDetail
       }
@@ -526,6 +549,50 @@
           .font(.caption)
       }
       .padding(24)
+      .navigationTitle("Fixture Sharing")
+    }
+
+    /// Delta 16a of the ladder: the plain half of the matched
+    /// caption-context pair. The text is the verbatim failing caption
+    /// from plainDetail (same string, font and default foreground),
+    /// mounted alone so its frame is deterministic. The transparent
+    /// spacers replicate the GroupBox title region and content insets
+    /// measured from the connection-chrome cell's render (24pt title
+    /// region above the text, 6pt leading inset), so the text's frame
+    /// matches the GroupBox half's content frame BY CONSTRUCTION;
+    /// the UI test still records the actual frame, and any mismatch
+    /// makes the comparison inconclusive, never negative.
+    @ViewBuilder private var captionContextPlainDetail: some View {
+      VStack(alignment: .leading, spacing: 0) {
+        Color.clear.frame(height: 24)
+        HStack(alignment: .top, spacing: 0) {
+          Color.clear.frame(width: 6)
+          Text("Fixture small caption text")
+            .font(.caption)
+            .accessibilityIdentifier("caption-context-target")
+        }
+      }
+      .padding(24)
+      .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
+      .navigationTitle("Fixture Sharing")
+    }
+
+    /// Delta 16b of the ladder: the GroupBox half of the matched
+    /// caption-context pair. The SAME text element sits inside
+    /// GroupBox("Connection") containment - the context that carries
+    /// the passing caption neighbor in the full app and fixture
+    /// replica. Same wrapper, same coordinates as the plain half; the
+    /// only intended difference is the immediate container context.
+    @ViewBuilder private var captionContextGroupBoxDetail: some View {
+      VStack(alignment: .leading, spacing: 0) {
+        GroupBox("Connection") {
+          Text("Fixture small caption text")
+            .font(.caption)
+            .accessibilityIdentifier("caption-context-target")
+        }
+      }
+      .padding(24)
+      .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
       .navigationTitle("Fixture Sharing")
     }
 

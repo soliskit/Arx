@@ -776,6 +776,49 @@ final class ArxUITests: XCTestCase {
       awaitCompletePhases: true)
   }
 
+  /// Delta 16a of the ladder: the plain half of the matched
+  /// caption-context pair for the Contrast class. The SAME caption
+  /// text (string, font, default foreground) as the failing
+  /// plainDetail caption, mounted alone at fixed coordinates, in a
+  /// plain VStack - no GroupBox. The strict audit is unchanged.
+  /// Bounded readings, hypotheses only: this cell is one half of ONE
+  /// discriminating comparison, read only together with its GroupBox
+  /// sibling and the recorded frames. If the frames differ, the
+  /// comparison is inconclusive by design, never negative. If this
+  /// cell fails and the sibling passes, the verdict is sensitive to
+  /// THIS container-context bundle in this configuration - not to a
+  /// named mechanism, and not an automatic app fix. If both fail,
+  /// THIS GroupBox variant did not change the verdict; that does not
+  /// establish a text-intrinsic cause and does not rule out other
+  /// container interactions. If this cell passes while the unchanged
+  /// plainDetail cells still fail in the same run, the pair premise
+  /// itself needs reassessment. A single run does not establish
+  /// recurrence.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureCaptionContextPlain() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: ["--arx-minimal-caption-context-plain"],
+      artifactName: "minimal-caption-context-plain-audit-window.png",
+      observedTargetIdentifier: "caption-context-target")
+  }
+
+  /// Delta 16b of the ladder: the GroupBox half of the matched
+  /// caption-context pair. The SAME text element inside
+  /// GroupBox("Connection") containment, the context carrying the
+  /// passing caption neighbor, at the same fixed coordinates as the
+  /// plain half. The strict audit is unchanged; the baseline
+  /// plainDetail cells in the same run re-establish the existing
+  /// failure. Read only together with its plain sibling and the
+  /// recorded frames; every outcome branch is bounded as declared on
+  /// delta 16a, and neither half alone carries a conclusion.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureCaptionContextGroupBox() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: ["--arx-minimal-caption-context-groupbox"],
+      artifactName: "minimal-caption-context-groupbox-audit-window.png",
+      observedTargetIdentifier: "caption-context-target")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any
@@ -785,7 +828,8 @@ final class ArxUITests: XCTestCase {
   /// never assertions.
   private func runMinimalFixtureAudit(
     extraArguments: [String], artifactName: String,
-    expectedPhaseLines: Int = 3, awaitCompletePhases: Bool = false
+    expectedPhaseLines: Int = 3, awaitCompletePhases: Bool = false,
+    observedTargetIdentifier: String? = nil
   ) throws {
     app.terminate()
     app = XCUIApplication()
@@ -838,6 +882,16 @@ final class ArxUITests: XCTestCase {
     // cell, because the no-scroll family demonstrated that geometry
     // varies with content. Observation only, never an assertion.
     print("pre-audit-window-frame: \(application.windows["main"].frame)")
+    // Matched-pair observation (delta 16): when a cell names a target
+    // element, record its existence and actual AX frame so the pair
+    // comparison's same-coordinates premise is verified evidence.
+    // Observation only, never an assertion; a missing target or a
+    // frame mismatch makes the comparison inconclusive by design.
+    if let observedTargetIdentifier {
+      let target = application.staticTexts[observedTargetIdentifier]
+      print("pre-audit-target-exists: \(target.exists)")
+      print("pre-audit-target-frame: \(target.frame)")
+    }
     let auditPNG = application.screenshot().pngRepresentation
     let artifacts = URL(fileURLWithPath: "/tmp/uitest-artifacts")
     try? FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
