@@ -976,14 +976,20 @@ final class ArxUITests: XCTestCase {
   /// two halves must record EQUAL pre-audit window frames (a
   /// difference is INVALID, never negative); the bridge-status target
   /// frame is recorded in both; both view-hierarchy dumps are
-  /// captured; and the geometry receipt must be delivered with both
-  /// values measured at runtime (a GeometryReader behind the framed
+  /// captured (c18: delivered complete through the nonce-named file
+  /// channel - the app's stdout does not reach the retained job log);
+  /// and the geometry receipt must be delivered with both values
+  /// measured at runtime (a GeometryReader behind the framed
   /// ScrollView measures the viewport, a second inside the content
-  /// measures the content) and the inequality enforced numerically -
-  /// this half must measure content at most the measured viewport. A
-  /// fixed frame alone is not runtime proof after c16's lesson: a
-  /// missing, malformed or inequality-violating receipt FAILS the
-  /// test, never a fits finding.
+  /// measures the content) and the inequality enforced numerically on
+  /// the pre-registered primary, the preference-key stackFrame - this
+  /// half must measure content at most the measured viewport. c18
+  /// adds comparative observations (the @State-delivered contentSize,
+  /// a 1600-point filler calibration, a write sequence number) that
+  /// are printed, never enforced. A fixed frame alone is not runtime
+  /// proof after c16's lesson: a missing, malformed, pending or
+  /// inequality-violating receipt FAILS the test, never a fits
+  /// finding.
   @MainActor
   func testAccessibilityAuditMinimalFixtureScrollFit() throws {
     try runMinimalFixtureAudit(
@@ -1007,7 +1013,9 @@ final class ArxUITests: XCTestCase {
   /// overflowing below), which the c16 window-growth cell could not
   /// construct. Same registered gates as the fit half; this half's
   /// receipt must measure content at least twice the measured
-  /// viewport. Bounded
+  /// viewport on the pre-registered primary (the preference-key
+  /// stackFrame); this half also carries the 1600-point filler
+  /// calibration measurement. Bounded
   /// readings, hypotheses only: bridge-status flagged here but not in
   /// the fit half implicates scroll-overflow for these cells
   /// (association, one run); unflagged here does not bear the
@@ -1098,8 +1106,13 @@ final class ArxUITests: XCTestCase {
     // fail-closed pattern as the responder phases, written by the
     // scroll pair cells only.
     let geometryNonce = UUID().uuidString
+    let dumpNonce = UUID().uuidString
     if geometryReceiptCell != nil {
       launchEnvironment["ARX_GEOMETRY_NONCE"] = geometryNonce
+      // c18: the registered hierarchy gate travels the same nonce-file
+      // family (see printViewHierarchyDump); only the scroll pair cells
+      // carry the gate, so only they get a dump nonce.
+      launchEnvironment["ARX_DUMP_NONCE"] = dumpNonce
     }
     app.launchEnvironment = launchEnvironment
     let phasesFileName = "arx-responder-phases-\(nonce).txt"
@@ -1121,9 +1134,17 @@ final class ArxUITests: XCTestCase {
         .appendingPathComponent("Library/Containers/com.soliskit.Arx/Data/tmp")
         .appendingPathComponent(geometryFileName),
     ]
+    let dumpFileName = "arx-dump-\(dumpNonce).txt"
+    let dumpFileCandidates = [
+      URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(dumpFileName),
+      URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("Library/Containers/com.soliskit.Arx/Data/tmp")
+        .appendingPathComponent(dumpFileName),
+    ]
     defer {
       for file in phasesFileCandidates { try? FileManager.default.removeItem(at: file) }
       for file in geometryFileCandidates { try? FileManager.default.removeItem(at: file) }
+      for file in dumpFileCandidates { try? FileManager.default.removeItem(at: file) }
     }
     XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
     let application = app!
@@ -1177,6 +1198,14 @@ final class ArxUITests: XCTestCase {
       // run can never read as a clean audit negative.
       if !printGeometryReceipt(from: geometryFileCandidates, expectedCell: geometryReceiptCell) {
         XCTFail("scroll-geometry: INVALID")
+      }
+      // c18: the registered reading of the scroll pair also requires
+      // the COMPLETE view-hierarchy dump, delivered through the
+      // nonce-named file (the app's stdout does not reach the retained
+      // job log). Missing, over-cap, mis-encoded or partial is INVALID,
+      // never an absent-hierarchy finding.
+      if !printViewHierarchyDump(from: dumpFileCandidates) {
+        XCTFail("arx-view-dump: INVALID")
       }
     }
     XCTAssertTrue(issues.isEmpty, issues.joined(separator: "\n---\n"))
@@ -1233,53 +1262,168 @@ final class ArxUITests: XCTestCase {
     for line in lines { print(line) }
   }
 
-  /// Delta 21 geometry receipt read, fail-closed: exactly one line of
-  /// the shape "scroll-geometry: cell=<expected> viewport=<measured>
-  /// content=<measured>" with the registered inequality enforced
-  /// numerically (fit: content at most viewport; overflow: content at
-  /// least twice viewport). Both geometry values are runtime
-  /// measurements written by the fixture; nothing here asserts the
-  /// declared 300-point frame. Anything missing, malformed, stale,
-  /// extra or inequality-violating prints INVALID once and returns
-  /// false so the caller fails the test. Bounded at the byte level
-  /// like the phases read.
+  /// Delta 21 geometry receipt read, fail-closed (c18 grammar): exactly
+  /// one line of the shape
+  /// "scroll-geometry: cell=<expected> seq=<n> viewport=<v|pending>
+  /// contentSize=<s|pending> stackFrame=<f|pending>
+  /// filler=<h|absent|pending>"
+  /// with the registered inequality enforced numerically on the
+  /// PRE-REGISTERED PRIMARY, stackFrame (the preference-key delivered
+  /// frame measurement): the fit half at most the measured viewport,
+  /// the overflow half at least twice it. viewport and stackFrame must
+  /// be present, finite and positive; the calibration filler must be
+  /// finite and positive in the overflow half and exactly "absent" in
+  /// the fit half (calibration missing exactly when the primary's
+  /// trustworthiness is in question is INVALID, never a pass).
+  /// contentSize and seq are comparative observations - printed, never
+  /// enforced (seq > 1 means only that earlier writes were
+  /// overwritten). Every invalid path prints its stage tag with the
+  /// raw line or the parsed values where they exist, bounded by the
+  /// byte-bounded read, so a failed gate is diagnosable rather than
+  /// lost. Anything missing, malformed, stale, extra, pending,
+  /// calibration-less or inequality-violating returns false so the
+  /// caller fails the test - INVALID, never a fits/overflow finding.
+  /// Nothing here asserts the declared 300-point frame.
   private func printGeometryReceipt(from candidates: [URL], expectedCell: String) -> Bool {
-    func invalid() -> Bool {
-      print("scroll-geometry: INVALID")
+    func invalid(_ stage: String, _ detail: String) -> Bool {
+      print("scroll-geometry: invalid-\(stage) \(detail)")
       return false
     }
     guard let file = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
       let handle = try? FileHandle(forReadingFrom: file)
-    else { return invalid() }
+    else { return invalid("missing", "(no receipt file)") }
     defer { try? handle.close() }
     let data = handle.readData(ofLength: Self.phasesReadLimit + 1)
-    guard data.count <= Self.phasesReadLimit,
-      let text = String(data: data, encoding: .utf8)
-    else { return invalid() }
+    guard data.count <= Self.phasesReadLimit
+    else { return invalid("oversized", "(>\(Self.phasesReadLimit) bytes)") }
+    guard let text = String(data: data, encoding: .utf8)
+    else { return invalid("encoding", "(not utf8)") }
     let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
-    guard lines.count == 1,
-      let match = lines[0].wholeMatch(
-        of: #/^scroll-geometry: cell=([a-z]+) viewport=([0-9.]+) content=([0-9.]+)$/#),
-      String(match.1) == expectedCell,
-      let viewport = Double(match.2),
-      let content = Double(match.3)
-    else { return invalid() }
+    // Token grammar, identical semantics to the registered receipt
+    // format, validated token by token to stay inside the lint
+    // line-length bound: one space-separated key=value field per
+    // measurement, in a fixed order, no spaces inside any value.
+    let tokens = lines.count == 1 ? lines[0].split(separator: " ") : []
+    func field(_ index: Int, _ key: String) -> Substring? {
+      guard tokens.indices.contains(index), tokens[index].hasPrefix(key + "=")
+      else { return nil }
+      return tokens[index].dropFirst(key.count + 1)
+    }
+    func isDigits(_ value: Substring) -> Bool {
+      !value.isEmpty && value.allSatisfy { $0.isNumber }
+    }
+    func isNumeric(_ value: Substring) -> Bool {
+      !value.isEmpty && value.allSatisfy { $0.isNumber || $0 == "." }
+    }
+    func isPendingOrNumeric(_ value: Substring) -> Bool {
+      value == "pending" || isNumeric(value)
+    }
+    guard tokens.count == 7,
+      tokens[0] == "scroll-geometry:",
+      let cell = field(1, "cell"),
+      !cell.isEmpty && cell.allSatisfy({ $0.isLetter && $0.isLowercase }),
+      String(cell) == expectedCell,
+      let seqToken = field(2, "seq"), isDigits(seqToken),
+      let viewportToken = field(3, "viewport"), isPendingOrNumeric(viewportToken),
+      let contentSizeToken = field(4, "contentSize"), isPendingOrNumeric(contentSizeToken),
+      let stackFrameToken = field(5, "stackFrame"), isPendingOrNumeric(stackFrameToken),
+      let fillerToken = field(6, "filler"),
+      isPendingOrNumeric(fillerToken) || fillerToken == "absent"
+    else { return invalid("grammar", "(raw: \(text))") }
+    guard let seq = Int(seqToken), seq >= 1,
+      let viewport = Double(viewportToken),
+      let stackFrame = Double(stackFrameToken)
+    else { return invalid("pending", "(raw: \(lines[0]))") }
     // Digit-shaped strings can still parse to infinity, and a zero
     // viewport would make the overflow inequality vacuous; require
     // finite, positive measurements explicitly.
-    guard viewport.isFinite, content.isFinite, viewport > 0, content > 0
-    else { return invalid() }
-    // The registered inequality, enforced numerically: the fit half
-    // must measure content at most the measured viewport; the overflow
-    // half at least twice it. Anything else is INVALID, never a
-    // fits/overflow finding.
+    guard viewport.isFinite, stackFrame.isFinite, viewport > 0, stackFrame > 0
+    else {
+      return invalid("finite", "(viewport=\(viewportToken) stackFrame=\(stackFrameToken))")
+    }
+    // Calibration presence, fail-closed: the overflow half must carry a
+    // finite, positive filler measurement; the fit half exactly
+    // "absent".
+    if expectedCell == "overflow" {
+      guard let filler = Double(fillerToken), filler.isFinite, filler > 0
+      else { return invalid("calibration", "(filler=\(fillerToken))") }
+    } else if fillerToken != "absent" {
+      return invalid("calibration", "(filler=\(fillerToken))")
+    }
+    // The registered inequality, enforced numerically on the
+    // pre-registered primary (stackFrame): the fit half at most the
+    // measured viewport, the overflow half at least twice it. Anything
+    // else is INVALID, never a fits/overflow finding.
     let inequalityHolds =
       expectedCell == "fit"
-      ? content <= viewport
-      : content >= 2 * viewport
-    guard inequalityHolds else { return invalid() }
+      ? stackFrame <= viewport
+      : stackFrame >= 2 * viewport
+    guard inequalityHolds
+    else {
+      return invalid(
+        "inequality", "(cell=\(expectedCell) viewport=\(viewport) stackFrame=\(stackFrame))")
+    }
     print(lines[0])
     return true
+  }
+
+  /// c18 hierarchy gate read, fail-closed: the registered scroll-pair
+  /// reading requires the COMPLETE dump block, delivered through the
+  /// nonce-named file (the app's stdout does not reach the retained CI
+  /// job log). The capture fires on a 2-second delay, so the read polls
+  /// every 50ms up to a bounded 10s deadline before declaring missing;
+  /// a deadline miss, an over-cap file, a mis-encoded file or a block
+  /// without both delimiters is INVALID, never an absent-hierarchy
+  /// finding; a block whose own summary reports node- or
+  /// depth-truncation is equally INVALID - complete means complete,
+  /// not capped-and-accepted. The read cap exceeds the block's
+  /// structural bound and an over-cap file is rejected whole, never
+  /// truncated. On success the complete block is printed to the
+  /// test's own stdout, which reaches the retained log.
+  private static let dumpReadLimit = 32768
+
+  private func printViewHierarchyDump(from candidates: [URL]) -> Bool {
+    func invalid(_ stage: String) -> Bool {
+      print("arx-view-dump: invalid-\(stage)")
+      return false
+    }
+    var sawPartial = false
+    let deadline = Date().addingTimeInterval(10)
+    while Date() < deadline {
+      if let file = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+        let handle = try? FileHandle(forReadingFrom: file)
+      {
+        let data = handle.readData(ofLength: Self.dumpReadLimit + 1)
+        try? handle.close()
+        guard data.count <= Self.dumpReadLimit else { return invalid("oversized") }
+        guard let text = String(data: data, encoding: .utf8) else { return invalid("encoding") }
+        guard
+          text.hasPrefix("ARX-VIEW-DUMP-v1-BEGIN\n"),
+          text.contains("\nARX-VIEW-DUMP-v1-END\n")
+        else {
+          // A partially visible file mid-poll is not yet terminal;
+          // the atomic write makes this unlikely, but keep polling.
+          sawPartial = true
+          Thread.sleep(forTimeInterval: 0.05)
+          continue
+        }
+        // Complete means complete: the block's own summary line must
+        // be present, and a node- or depth-truncated capture is
+        // INVALID, never accepted as the complete hierarchy.
+        guard
+          let summary = text.split(separator: "\n").first(where: {
+            $0.hasPrefix("nodes: ")
+          })
+        else { return invalid("partial") }
+        guard !summary.contains("node-truncated: true"),
+          !summary.contains("depth-truncated: true")
+        else { return invalid("truncated") }
+        print(text)
+        return true
+      }
+      Thread.sleep(forTimeInterval: 0.05)
+    }
+    return invalid(sawPartial ? "partial" : "missing")
   }
 
   /// Awaited variant for the late-displacement cell (delta 15): polls

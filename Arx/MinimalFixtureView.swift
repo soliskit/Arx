@@ -381,9 +381,37 @@
 
     /// Runtime-measured geometry for the delta-21 scroll pair: the
     /// rendered viewport height and the scroll content height. Both
-    /// start nil; the receipt is written only once both are measured.
+    /// start nil; since c18 the receipt is written on every measurement
+    /// event with pending markers for values not yet landed.
     @State private var scrollViewportHeight: CGFloat?
     @State private var scrollContentHeight: CGFloat?
+    /// c18 comparative geometry (delta 21 cause repair): the laid-out
+    /// stack height delivered via preference key + onPreferenceChange,
+    /// a genuinely different delivery path than the @State/onAppear
+    /// value c17 could not reconcile (3964 for ~1751pt of constructed
+    /// content); a calibration measurement of the declared 1600-point
+    /// filler via its own preference key; and the receipt write
+    /// sequence counter.
+    @State private var scrollStackFrame: CGFloat?
+    @State private var scrollFillerHeight: CGFloat?
+    @State private var scrollGeometrySeq = 0
+
+    /// c18 preference keys. Delivery via preference + onPreferenceChange
+    /// differs from the @State/onAppear path; a frame(in:) value under
+    /// a pure translation is NOT an independent measurement from the
+    /// same reader's size, so the two are not registered as such.
+    private struct ScrollStackFrameKey: PreferenceKey {
+      static let defaultValue: CGFloat? = nil
+      static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = nextValue() ?? value
+      }
+    }
+    private struct ScrollFillerHeightKey: PreferenceKey {
+      static let defaultValue: CGFloat? = nil
+      static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = nextValue() ?? value
+      }
+    }
 
     /// True only when a control test passes --arx-minimal-scroll-fit:
     /// the texts cell content inside a ScrollView pinned to a fixed
@@ -953,11 +981,21 @@
     /// 1600-point clear filler. Both geometry values are MEASURED, not
     /// declared: a GeometryReader inside the scroll content measures
     /// the content height, and a second GeometryReader behind the
-    /// framed ScrollView measures the rendered viewport height. The
-    /// receipt is written once both measurements have landed. The
-    /// registered evidence gate requires the receipt (fit half must
-    /// measure content at most the viewport; the overflow half at
-    /// least twice the viewport) plus equal recorded window frames;
+    /// framed ScrollView measures the rendered viewport height. c18
+    /// adds two comparative measurements: the same content reader's
+    /// frame(in: "scrollPair").height delivered via preference key (a
+    /// genuinely different delivery path than @State/onAppear; a frame
+    /// value under a pure translation is NOT an independent measurement
+    /// from the same reader's size and is not registered as such) and
+    /// a calibration measurement of the declared 1600-point filler via
+    /// its own preference key. The receipt is written on EVERY
+    /// measurement event with a write sequence number (seq > 1 means
+    /// only that earlier writes were overwritten, never a transient
+    /// cause by itself). The registered evidence gate requires the
+    /// receipt (enforced on the pre-registered primary, the
+    /// preference-key stackFrame: fit half at most the viewport,
+    /// overflow half at least twice it) plus equal recorded window
+    /// frames;
     /// the test fails on a missing, malformed or inequality-violating
     /// receipt, so an invalid run can never read as a clean negative.
     /// Bounded readings, hypotheses only: bridge-status flagged in the
@@ -973,15 +1011,27 @@
           revokeCaption
           if scrollOverflowRequested {
             Color.clear.frame(height: 1600)
+              .background(
+                GeometryReader { proxy in
+                  Color.clear.preference(
+                    key: ScrollFillerHeightKey.self,
+                    value: proxy.frame(in: .named("scrollPair")).height)
+                }
+              )
           }
         }
         .padding(24)
         .background(
           GeometryReader { proxy in
-            Color.clear.onAppear { scrollContentHeight = proxy.size.height }
+            Color.clear
+              .onAppear { scrollContentHeight = proxy.size.height }
+              .preference(
+                key: ScrollStackFrameKey.self,
+                value: proxy.frame(in: .named("scrollPair")).height)
           }
         )
       }
+      .coordinateSpace(name: "scrollPair")
       .frame(height: 300)
       .background(
         GeometryReader { proxy in
@@ -992,18 +1042,42 @@
       .navigationTitle("Sharing")
       .onChange(of: scrollContentHeight) { writeScrollGeometryReceipt() }
       .onChange(of: scrollViewportHeight) { writeScrollGeometryReceipt() }
+      .onPreferenceChange(ScrollStackFrameKey.self) {
+        scrollStackFrame = $0
+        writeScrollGeometryReceipt()
+      }
+      .onPreferenceChange(ScrollFillerHeightKey.self) {
+        scrollFillerHeight = $0
+        writeScrollGeometryReceipt()
+      }
     }
 
-    /// The receipt goes out once, when both runtime measurements have
-    /// landed; before that there is nothing to report and the test
-    /// side reads INVALID. Both halves use the same writer.
+    /// c18: the receipt is written on EVERY measurement event, whether
+    /// or not all values have landed; the write sequence number records
+    /// the channel's last-write-wins history. Grammar:
+    /// scroll-geometry: cell=<fit|overflow> seq=<n>
+    /// viewport=<v|pending> contentSize=<s|pending>
+    /// stackFrame=<f|pending> filler=<h|absent|pending>
+    /// contentSize is the original background-GeometryReader proxy.size
+    /// value delivered via @State/onAppear; stackFrame is the same
+    /// reader's frame(in: "scrollPair").height delivered via preference
+    /// key; filler is the calibration measurement of the declared
+    /// 1600-point filler (absent in the fit half, which has no filler).
+    /// Bounded readings only: filler near 1600 while stackFrame departs
+    /// from construction narrows toward the stack site; filler far from
+    /// 1600 narrows toward the measurement environment; agreement
+    /// narrows but does not prove all stack dimensions. Both halves
+    /// use the same writer.
     private func writeScrollGeometryReceipt() {
-      guard let content = scrollContentHeight, let viewport = scrollViewportHeight else {
-        return
-      }
+      scrollGeometrySeq += 1
+      func field(_ value: CGFloat?) -> String { value.map { "\($0)" } ?? "pending" }
       Self.writeGeometryReceipt(
         "scroll-geometry: cell=\(scrollOverflowRequested ? "overflow" : "fit")"
-          + " viewport=\(viewport) content=\(content)",
+          + " seq=\(scrollGeometrySeq)"
+          + " viewport=\(field(scrollViewportHeight))"
+          + " contentSize=\(field(scrollContentHeight))"
+          + " stackFrame=\(field(scrollStackFrame))"
+          + " filler=\(scrollOverflowRequested ? field(scrollFillerHeight) : "absent")",
         to: Self.geometryFile)
     }
 

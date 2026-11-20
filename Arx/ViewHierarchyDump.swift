@@ -10,11 +10,14 @@
 #endif
 
 /// Prints a bounded snapshot of the owned fixture window's AppKit view
-/// hierarchy to stdout so audit findings can be attributed to concrete views.
-/// xcodebuild captures the tested app's stdout into the run's .xcresult
-/// bundle, which the existing CI workflow already uploads; the delimited
-/// block is extracted from that bundle during analysis. There is no file
-/// transport and no workflow change.
+/// hierarchy to stdout so audit findings can be attributed to concrete views,
+/// and (c18) writes the same block to a nonce-named file when the launch
+/// supplies ARX_DUMP_NONCE. The tested app's stdout does not reach the
+/// retained CI job log in this workflow (the marker block appears in no
+/// retained log), so the registered hierarchy gate is delivered through the
+/// file, the same channel family as the responder phases and geometry
+/// receipts. Absent a nonce, the stdout print still serves local runs.
+/// There is no workflow change.
 ///
 /// Fail-closed: it prints nothing unless ALL of the following hold - a DEBUG
 /// build, the runtime model is the fixture store (no EventKit store exists),
@@ -65,9 +68,21 @@ enum ViewHierarchyDump {
         lines.append(
           "nodes: \(300 - remaining) node-truncated: \(remaining == 0)"
             + " depth-truncated: \(depthCapped)")
-        print("ARX-VIEW-DUMP-v1-BEGIN")
-        print(lines.joined(separator: "\n"))
-        print("ARX-VIEW-DUMP-v1-END")
+        let block =
+          "ARX-VIEW-DUMP-v1-BEGIN\n" + lines.joined(separator: "\n")
+          + "\nARX-VIEW-DUMP-v1-END\n"
+        print(block)
+        // c18: deliver the complete block through the nonce-named file
+        // (same channel family as the responder phases and geometry
+        // receipts). The block is bounded by construction (300-node and
+        // depth-16 caps) and written atomically.
+        if let nonce = ProcessInfo.processInfo.environment["ARX_DUMP_NONCE"],
+          nonce.range(of: "^[0-9A-Fa-f-]{36}$", options: .regularExpression) != nil
+        {
+          let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("arx-dump-\(nonce).txt")
+          try? block.write(to: file, atomically: true, encoding: .utf8)
+        }
       }
     #endif
   }
