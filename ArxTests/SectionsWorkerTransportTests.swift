@@ -341,8 +341,9 @@ struct SectionsWorkerTransportTests {
   // One crash point per marker position of every action, plus the zero-marker
   // case. Marker input comes from the production sequence table; every
   // expected interval phrase below is hardcoded so the wording itself is
-  // tested, not rederived.
-  private struct CrashPoint: Sendable, CustomTestStringConvertible {
+  // tested, not rederived. The type is file-internal (not private) because it
+  // appears in the signature of the parametrized test below.
+  struct CrashPoint: Sendable, CustomTestStringConvertible {
     var action: String
     var markerCount: Int
     var expectedStage: String
