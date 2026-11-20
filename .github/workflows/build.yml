@@ -130,7 +130,7 @@ jobs:
           fi
           changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)"
           printf 'Covered-path input:\n%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -Eq '^(BridgeCore/|Package\.swift|Package\.resolved|scripts/browser-proof-safari\.mjs|scripts/browser-outcomes\.mjs|scripts/browser-edits\.mjs|^\.github/workflows/build\.yml$)'; then
+          if printf '%s\n' "$changed" | grep -Eq '^(BridgeCore/|BridgeFixtureServer/|Package\.swift|Package\.resolved|scripts/browser-proof-safari\.mjs|scripts/browser-outcomes\.mjs|scripts/browser-edits\.mjs|scripts/check-listener-exclusivity\.sh|^\.github/workflows/build\.yml$)'; then
             echo "safari=true" >> "$GITHUB_OUTPUT"
           else
             echo "safari=false" >> "$GITHUB_OUTPUT"
