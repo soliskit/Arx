@@ -819,6 +819,58 @@ final class ArxUITests: XCTestCase {
       observedTargetIdentifier: "caption-context-target")
   }
 
+  /// Delta 17a of the ladder: the plain half of the FOREGROUND-
+  /// SECONDARY caption-context pair. Identical to delta 16a except
+  /// the caption text carries an explicit
+  /// .foregroundStyle(.secondary); the default-foreground pair (16a/
+  /// 16b) is retained unchanged as the same-run control. Observed
+  /// outcomes are bounded by the recorded-frame gate (a mismatch is
+  /// inconclusive, never negative) and the anomaly downgrade (if the
+  /// default pair does not reproduce its c11 verdicts in the same
+  /// run, cross-pair reads downgrade to raw verdicts). Bounded
+  /// readings, hypotheses only, pre-registered:
+  /// - If BOTH secondary halves fail, no containment split is
+  ///   observed for THIS caption/style/pair/run. That does not
+  ///   eliminate containment as a factor for other styles or
+  ///   configurations. If the unchanged default pair reproduces its
+  ///   c11 split in the same run, the foreground style is ASSOCIATED
+  ///   with the split within this run only - association, not
+  ///   mechanism.
+  /// - If plain-secondary fails and groupbox-secondary passes, the
+  ///   split persists under .secondary for THIS pair/run; every other
+  ///   difference from any other context (window, position, siblings,
+  ///   titles, surrounding content) remains uncontrolled.
+  /// - If plain-secondary PASSES, the style change altered this
+  ///   plain half's outcome for this fixture; report raw verdicts
+  ///   only, no mechanism claim.
+  /// - A missing target or a frame mismatch makes the read
+  ///   inconclusive by design, never negative. If the unchanged
+  ///   default pair does NOT reproduce its c11 verdicts in the same
+  ///   run, the run is anomalous: cross-pair reads downgrade to raw
+  ///   verdicts and no recurrence is claimed.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureCaptionContextPlainSecondary() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: ["--arx-minimal-caption-context-plain-secondary"],
+      artifactName: "minimal-caption-context-plain-secondary-audit-window.png",
+      observedTargetIdentifier: "caption-context-secondary-target")
+  }
+
+  /// Delta 17b of the ladder: the GroupBox half of the FOREGROUND-
+  /// SECONDARY caption-context pair. The SAME .secondary caption text
+  /// inside the SAME GroupBox("Connection") containment at the same
+  /// fixed coordinates as its plain sibling. Read only together with
+  /// delta 17a and the recorded frames; every outcome branch is
+  /// bounded as declared on delta 17a, and neither half alone carries
+  /// a conclusion.
+  @MainActor
+  func testAccessibilityAuditMinimalFixtureCaptionContextGroupBoxSecondary() throws {
+    try runMinimalFixtureAudit(
+      extraArguments: ["--arx-minimal-caption-context-groupbox-secondary"],
+      artifactName: "minimal-caption-context-groupbox-secondary-audit-window.png",
+      observedTargetIdentifier: "caption-context-secondary-target")
+  }
+
   /// Shared body of the minimal-fixture control runs: relaunch into the
   /// minimal fixture with the given extra arguments, record the pre-audit
   /// state observations and a window render (evidence for interpreting any

@@ -323,6 +323,26 @@
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-caption-context-groupbox")
     }
 
+    /// True only when a control test passes
+    /// --arx-minimal-caption-context-plain-secondary: the plain half
+    /// of the FOREGROUND-SECONDARY caption-context pair - identical
+    /// to the default-foreground plain half except the caption text
+    /// carries an explicit .foregroundStyle(.secondary). The
+    /// default-foreground pair stays intact so one run carries both
+    /// pairs.
+    private var captionContextPlainSecondaryRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-caption-context-plain-secondary")
+    }
+
+    /// True only when a control test passes
+    /// --arx-minimal-caption-context-groupbox-secondary: the GroupBox
+    /// half of the FOREGROUND-SECONDARY caption-context pair - the
+    /// same .secondary caption inside the same GroupBox("Connection")
+    /// containment as the default-foreground GroupBox half.
+    private var captionContextGroupBoxSecondaryRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-caption-context-groupbox-secondary")
+    }
+
     /// True only when a control test passes --arx-minimal-fixture-labels:
     /// forces the fixture label tokens even when content mode is on, so
     /// the content+fixture-labels cell of the 2x2 runs with the label
@@ -525,6 +545,10 @@
         captionContextPlainDetail
       } else if captionContextGroupBoxRequested {
         captionContextGroupBoxDetail
+      } else if captionContextPlainSecondaryRequested {
+        captionContextPlainSecondaryDetail
+      } else if captionContextGroupBoxSecondaryRequested {
+        captionContextGroupBoxSecondaryDetail
       } else {
         plainDetail
       }
@@ -592,6 +616,54 @@
           Text("Fixture small caption text")
             .font(.caption)
             .accessibilityIdentifier("caption-context-target")
+        }
+      }
+      .padding(24)
+      .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
+      .navigationTitle("Fixture Sharing")
+    }
+
+    /// Delta 17a of the ladder: the plain half of the matched
+    /// FOREGROUND-SECONDARY caption-context pair. Identical to delta
+    /// 16a (same string, same caption font, same corrected spacers,
+    /// same coordinates) except the caption text carries
+    /// .foregroundStyle(.secondary). The single intended difference
+    /// from delta 16a is the
+    /// foreground style, so a same-run comparison of the two plain
+    /// halves isolates THAT variable for this fixture - one pair of
+    /// halves, one configuration, one run. A separate target
+    /// identifier keeps its observations distinct from the
+    /// default-foreground pair.
+    @ViewBuilder private var captionContextPlainSecondaryDetail: some View {
+      VStack(alignment: .leading, spacing: 0) {
+        Color.clear.frame(height: 22)
+        HStack(alignment: .top, spacing: 0) {
+          Color.clear.frame(width: 5)
+          Text("Fixture small caption text")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("caption-context-secondary-target")
+        }
+      }
+      .padding(24)
+      .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
+      .navigationTitle("Fixture Sharing")
+    }
+
+    /// Delta 17b of the ladder: the GroupBox half of the matched
+    /// FOREGROUND-SECONDARY caption-context pair. Identical to delta
+    /// 16b (same GroupBox("Connection") wrapper, same coordinates)
+    /// except the caption text carries .foregroundStyle(.secondary).
+    /// The only intended difference from delta 16b is the foreground
+    /// style; the only intended difference from delta 17a is the
+    /// immediate container context.
+    @ViewBuilder private var captionContextGroupBoxSecondaryDetail: some View {
+      VStack(alignment: .leading, spacing: 0) {
+        GroupBox("Connection") {
+          Text("Fixture small caption text")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("caption-context-secondary-target")
         }
       }
       .padding(24)
