@@ -377,10 +377,29 @@
     /// tree's Keyboard Focused attribute remains the per-element
     /// evidence.
     private func recordFirstResponderPhases() {
+      // Observability repair (c3/c4): the job log never carries the app
+      // process's stdout, so the same descriptors are also handed over
+      // through a per-launch nonce-named file. The write side uses only
+      // FileManager.default.temporaryDirectory, which Foundation
+      // resolves for the current user; where it lands depends on
+      // whether this build runs sandboxed, and no location is asserted
+      // here. The test side checks its own deterministic candidates
+      // and treats absence at every candidate as INVALID, never
+      // negative. The nonce arrives via launch environment and is
+      // shape-checked; the file holds only these fixed synthetic
+      // descriptor lines.
+      let phasesFile: URL? = {
+        guard let nonce = ProcessInfo.processInfo.environment["ARX_RESPONDER_PHASES_NONCE"],
+          nonce.range(of: "^[0-9A-Fa-f-]{36}$", options: .regularExpression) != nil
+        else { return nil }
+        return FileManager.default.temporaryDirectory
+          .appendingPathComponent("arx-responder-phases-\(nonce).txt")
+      }()
       for (index, delay) in [0.0, 0.5, 1.0].enumerated() {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
           guard let window = NSApplication.shared.keyWindow else {
             print("pre-audit-first-responder-\(index): no-key-window")
+            Self.writePhase(index, descriptor: "no-key-window", to: phasesFile)
             return
           }
           let descriptor: String
@@ -392,8 +411,19 @@
             descriptor = "none"
           }
           print("pre-audit-first-responder-\(index): \(descriptor)")
+          Self.writePhase(index, descriptor: descriptor, to: phasesFile)
         }
       }
+    }
+
+    /// Phases fire in order on the main queue, so this read-modify-write is
+    /// serialized; the atomic write means a reader sees either a complete
+    /// prefix or nothing, and a short file is always INVALID.
+    private static func writePhase(_ index: Int, descriptor: String, to file: URL?) {
+      guard let file else { return }
+      let existing = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+      try? (existing + "pre-audit-first-responder-\(index): \(descriptor)\n")
+        .write(to: file, atomically: true, encoding: .utf8)
     }
 
     @ViewBuilder private var sidebarColumn: some View {

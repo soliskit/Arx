@@ -751,7 +751,45 @@ final class ArxUITests: XCTestCase {
     app.terminate()
     app = XCUIApplication()
     app.launchArguments = ["--bridge-fixtures", "--arx-minimal-fixture"] + extraArguments
+    // Observability repair (c3/c4): the app's stdout never reaches the
+    // job log, so the DEBUG responder descriptors travel through a file
+    // instead. A fresh per-launch nonce names it; a missing or stale
+    // file (no nonce match) is INVALID evidence, never a negative
+    // finding.
+    //
+    // Candidate locations, both fail-closed (absence reads INVALID):
+    // 1. NSTemporaryDirectory(), documented by Apple as "the temporary
+    //    directory for the current user". The CI workflow builds with
+    //    CODE_SIGNING_ALLOWED=NO, so the app likely runs unsigned and
+    //    unsandboxed; app and runner sharing one TMPDIR is then the
+    //    expected case, but that equality remains a hypothesis until a
+    //    launch actually delivers descriptors - a shared UID alone
+    //    does not prove an identical process environment.
+    // 2. ~/Library/Containers/com.soliskit.Arx/Data/tmp. Apple's sandbox
+    //    documentation places a sandboxed app's container under
+    //    ~/Library/Containers and, on macOS 14+, associates it via the
+    //    app's code signature; the bundle identifier is pinned in
+    //    project.pbxproj. An unsigned build makes this the less likely
+    //    case, and macOS can additionally require user consent before
+    //    one process enters another app's container, which a headless
+    //    runner cannot grant: if the path is unreachable the read
+    //    fails and the outcome is INVALID, never negative. No runtime
+    //    validity is claimed before actual descriptor delivery.
+    let nonce = UUID().uuidString
+    app.launchEnvironment = ["ARX_RESPONDER_PHASES_NONCE": nonce]
+    let phasesFileName = "arx-responder-phases-\(nonce).txt"
+    let phasesFileCandidates = [
+      URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(phasesFileName),
+      URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("Library/Containers/com.soliskit.Arx/Data/tmp")
+        .appendingPathComponent(phasesFileName),
+    ]
     app.launch()
+    // Cleanup is registered up front so it runs even when the audit
+    // throws. Removal is best-effort: a leftover file carries a stale
+    // nonce that no future launch can match, so residue is never
+    // consumed.
+    defer { for file in phasesFileCandidates { try? FileManager.default.removeItem(at: file) } }
     XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
     let application = app!
 
@@ -767,7 +805,57 @@ final class ArxUITests: XCTestCase {
     try? auditPNG.write(to: artifacts.appendingPathComponent(artifactName))
 
     let issues = try strictAuditIssueLines(application)
+    // Bounded handoff read (c4). Placed after the audit, whose
+    // wall-clock duration exceeds the 1.0s final phase delay in
+    // practice; a file still short at read time yields INVALID-partial,
+    // never partial evidence. The read is bounded at the byte level:
+    // at most limit+1 bytes are read, and anything longer, malformed
+    // or mis-encoded is INVALID. The audit above is unchanged; these
+    // lines are observation, never assertions.
+    printResponderPhases(from: phasesFileCandidates)
     XCTAssertTrue(issues.isEmpty, issues.joined(separator: "\n---\n"))
+  }
+
+  /// Prints the three DEBUG responder-phase descriptors the app handed
+  /// over for this launch, or a single INVALID marker. The first
+  /// candidate file that exists is the handoff; a line is well-formed
+  /// only as `pre-audit-first-responder-<phase>: <token>` with a known
+  /// phase index. The read is bounded at the byte level: at most
+  /// `phasesReadLimit + 1` bytes are read, so an oversized file is
+  /// rejected without being consumed. Anything else - missing file,
+  /// short, oversized, mis-encoded, malformed - prints INVALID for
+  /// that launch. Observation only; no assertions here.
+  private static let phasesReadLimit = 1024
+
+  private func printResponderPhases(from candidates: [URL]) {
+    guard let file = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+      let handle = try? FileHandle(forReadingFrom: file)
+    else {
+      print("pre-audit-first-responder: invalid-missing")
+      return
+    }
+    defer { try? handle.close() }
+    let data = handle.readData(ofLength: Self.phasesReadLimit + 1)
+    guard data.count <= Self.phasesReadLimit else {
+      print("pre-audit-first-responder: invalid-oversized")
+      return
+    }
+    guard let text = String(data: data, encoding: .utf8) else {
+      print("pre-audit-first-responder: invalid-encoding")
+      return
+    }
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: false).dropLast()
+    let valid =
+      lines.count == 3
+      && lines.enumerated().allSatisfy { index, line in
+        line.hasPrefix("pre-audit-first-responder-\(index): ")
+          && !line.dropFirst("pre-audit-first-responder-\(index): ".count).isEmpty
+      }
+    guard valid else {
+      print("pre-audit-first-responder: invalid-partial")
+      return
+    }
+    for line in lines { print(line) }
   }
 
   /// Runs the strict accessibility audit (every issue type, no filters) and
