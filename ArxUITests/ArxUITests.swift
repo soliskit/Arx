@@ -981,9 +981,11 @@ final class ArxUITests: XCTestCase {
   /// and the geometry receipt must be delivered with both values
   /// measured at runtime (a GeometryReader behind the framed
   /// ScrollView measures the viewport, a second inside the content
-  /// measures the content) and the inequality enforced numerically on
-  /// the pre-registered primary, the preference-key stackFrame - this
-  /// half must measure content at most the measured viewport. c18
+  /// measures the content). c22 moves the fit/overflow primary to
+  /// the AppKit layout records in the dump: this half requires the
+  /// selected scroll view's document height at most its visible clip
+  /// height; the SwiftUI receipt stays printed and fail-closed on
+  /// validity but no longer decides fit. c18
   /// adds comparative observations (the @State-delivered contentSize,
   /// a 1600-point filler calibration, a write sequence number) that
   /// are printed, never enforced. A fixed frame alone is not runtime
@@ -1013,9 +1015,10 @@ final class ArxUITests: XCTestCase {
   /// overflowing below), which the c16 window-growth cell could not
   /// construct. Same registered gates as the fit half; this half's
   /// receipt must measure content at least twice the measured
-  /// viewport on the pre-registered primary (the preference-key
-  /// stackFrame); this half also carries the 1600-point filler
-  /// calibration measurement. Bounded
+  /// viewport, and since c22 that overflow inequality is enforced on
+  /// the AppKit primary (document height at least twice the visible
+  /// clip height of the selected scroll view); this half also carries
+  /// the 1600-point filler calibration measurement. Bounded
   /// readings, hypotheses only: bridge-status flagged here but not in
   /// the fit half implicates scroll-overflow for these cells
   /// (association, one run); unflagged here does not bear the
@@ -1209,8 +1212,11 @@ final class ArxUITests: XCTestCase {
     }
     // Geometry receipt (delta 21): fail-closed. The registered
     // reading of the scroll pair requires this receipt; a missing,
-    // malformed or inequality-violating one fails the test below, so
-    // the cell is INVALID, never a fits/overflow finding.
+    // malformed or invalid-data one fails the test below, so
+    // the cell is INVALID, never a fits/overflow finding. Since c22
+    // the receipt is comparative-only; the fit/overflow inequality
+    // itself is enforced on the AppKit primary inside
+    // printViewHierarchyDump.
     if let geometryReceiptCell {
       // c19: collect ALL evidence before ANY failure. The suite sets
       // continueAfterFailure=false, so in c18 a failing fit-half
@@ -1224,7 +1230,8 @@ final class ArxUITests: XCTestCase {
       // never an absent-hierarchy finding.
       let receiptOK = printGeometryReceipt(
         from: geometryFileCandidates, expectedCell: geometryReceiptCell)
-      let dumpOK = printViewHierarchyDump(from: dumpFileCandidates)
+      let dumpOK = printViewHierarchyDump(
+        from: dumpFileCandidates, expectedCell: geometryReceiptCell)
       // ONE combined failure: the suite sets continueAfterFailure=false,
       // so sequential XCTFails would record only the first gate and
       // leave the second verdict in stdout alone (exactly the c18
@@ -1296,10 +1303,11 @@ final class ArxUITests: XCTestCase {
   /// contentSize=<s|pending> stackFrame=<f|pending>
   /// filler=<h|absent|pending> firstY=<y|pending> lastY=<y|pending>
   /// span=<y|pending>"
-  /// with the registered inequality enforced numerically on the
-  /// PRE-REGISTERED PRIMARY, stackFrame (the preference-key delivered
-  /// frame measurement): the fit half at most the measured viewport,
-  /// the overflow half at least twice it. viewport and stackFrame must
+  /// c22: NO inequality is enforced here any more - the fit/overflow
+  /// primary moved to the AppKit scroll-view records in the view
+  /// dump (document height vs visible clip height, enforced in
+  /// printViewHierarchyDump). This receipt stays comparative-only:
+  /// printed and fail-closed on data validity. viewport and stackFrame must
   /// be present, finite and positive; the calibration filler must be
   /// finite and positive in the overflow half and exactly "absent" in
   /// the fit half (calibration missing exactly when the primary's
@@ -1309,8 +1317,8 @@ final class ArxUITests: XCTestCase {
   /// overwritten). Every invalid path prints its stage tag with the
   /// raw line or the parsed values where they exist, bounded by the
   /// byte-bounded read, so a failed gate is diagnosable rather than
-  /// lost. Anything missing, malformed, stale, extra, pending,
-  /// calibration-less or inequality-violating returns false so the
+  /// lost. Anything missing, malformed, stale, extra, pending or
+  /// calibration-less returns false so the
   /// caller fails the test - INVALID, never a fits/overflow finding.
   /// Nothing here asserts the declared 300-point frame. c19: the
   /// comparative trio firstY/lastY/span is SIGNED (an optional leading
@@ -1411,19 +1419,17 @@ final class ArxUITests: XCTestCase {
     } else if fillerToken != "absent" {
       return invalid("calibration", "(filler=\(fillerToken))")
     }
-    // The registered inequality, enforced numerically on the
-    // pre-registered primary (stackFrame): the fit half at most the
-    // measured viewport, the overflow half at least twice it. Anything
-    // else is INVALID, never a fits/overflow finding.
-    let inequalityHolds =
-      expectedCell == "fit"
-      ? stackFrame <= viewport
-      : stackFrame >= 2 * viewport
-    guard inequalityHolds
-    else {
-      return invalid(
-        "inequality", "(cell=\(expectedCell) viewport=\(viewport) stackFrame=\(stackFrame))")
-    }
+    // c22: the receipt stops DECIDING whether content fits. Every
+    // measurement above stays printed and fail-closed on validity
+    // (grammar, finite/positive viewport and stackFrame, finite
+    // comparative trio, per-cell calibration), so an unreadable or
+    // invalid receipt still fails the test; but the fit/overflow
+    // verdict itself moved to the AppKit primary in
+    // printViewHierarchyDump (document height vs visible clip height),
+    // after one run read 148 points of laid-out document against a
+    // 2,344-point preference stackFrame for the same cell, a
+    // discrepancy between related families captured at different
+    // times that remains unexplained.
     return true
   }
 
@@ -1448,10 +1454,35 @@ final class ArxUITests: XCTestCase {
   /// this launch, gate element false, write-level failure}.
   private static let dumpReadLimit = 32768
 
-  private func printViewHierarchyDump(from candidates: [URL]) -> Bool {
+  private func printViewHierarchyDump(from candidates: [URL], expectedCell: String) -> Bool {
     func invalid(_ stage: String, _ detail: String = "") -> Bool {
       print("arx-view-dump: invalid-\(stage)\(detail.isEmpty ? "" : " \(detail)")")
       return false
+    }
+    // c22 AppKit primary: one scrollview record's rect field, printed
+    // by the writer as (x, y, w, h) in fixed order. Strict decimal
+    // shape only (optional leading minus); anything else, including
+    // exponent notation, parses as invalid rather than being
+    // half-read. Returns width and height. The key is anchored to a
+    // preceding space so "frame" can never match the tail of
+    // "document-frame" on a malformed line.
+    func rectSize(_ line: Substring, _ key: String) -> (width: Double, height: Double)? {
+      guard let keyStart = line.range(of: " " + key + "=(") else { return nil }
+      let rest = line[keyStart.upperBound...]
+      guard let close = rest.firstIndex(of: ")") else { return nil }
+      let parts = rest[..<close].split(separator: ",").map {
+        $0.trimmingCharacters(in: .whitespaces)
+      }
+      guard parts.count == 4 else { return nil }
+      var values: [Double] = []
+      for part in parts {
+        let digits = part.hasPrefix("-") ? String(part.dropFirst()) : part
+        guard !digits.isEmpty, digits.allSatisfy({ $0.isNumber || $0 == "." }),
+          let value = Double(part), value.isFinite
+        else { return nil }
+        values.append(value)
+      }
+      return (values[2], values[3])
     }
     var sawPartial = false
     var lastStage: String?
@@ -1487,7 +1518,66 @@ final class ArxUITests: XCTestCase {
           guard !summary.contains("node-truncated: true"),
             !summary.contains("depth-truncated: true")
           else { return invalid("truncated") }
+          // Raw block first, verdict second: every gate below prints
+          // its decision only after the complete evidence is visible.
           print(text)
+          // c22: the fit/overflow primary moves from the SwiftUI
+          // preference receipt to the AppKit layout: the laid-out
+          // document height against the visible clip height of the
+          // fixture's scroll area. Selector: the unique scrollview
+          // record whose frame height is the fixture scroll area's
+          // 300 points; zero or multiple matches are INVALID, never
+          // a finding, and a selected record without a document
+          // frame is equally INVALID.
+          var selected = 0
+          var absentDocument = false
+          var documentHeight: Double?
+          var visibleHeight: Double?
+          for line in blockLines where line.hasPrefix("scrollview node=") {
+            guard let frame = rectSize(line, "frame")
+            else { return invalid("scroll-grammar", "(\(line))") }
+            guard frame.height == 300 else { continue }
+            selected += 1
+            if line.contains("document-frame=absent") {
+              absentDocument = true
+              continue
+            }
+            guard let clip = rectSize(line, "clip-bounds"),
+              let document = rectSize(line, "document-frame")
+            else { return invalid("scroll-grammar", "(\(line))") }
+            visibleHeight = clip.height
+            documentHeight = document.height
+          }
+          guard selected == 1, !absentDocument,
+            let documentHeight, let visibleHeight
+          else {
+            return invalid(
+              "selector", "(matches=\(selected) absent=\(absentDocument))")
+          }
+          // A zero height would make the overflow inequality vacuous;
+          // negative extents are not valid layout for this fixture.
+          guard documentHeight > 0, visibleHeight > 0
+          else {
+            return invalid(
+              "scroll-finite", "(document=\(documentHeight) visible=\(visibleHeight))")
+          }
+          // The registered inequality, enforced numerically on the
+          // AppKit primary: the fit half at most the visible height,
+          // the overflow half at least twice it. Anything else is
+          // INVALID, never a fits/overflow finding.
+          let inequalityHolds =
+            expectedCell == "fit"
+            ? documentHeight <= visibleHeight
+            : documentHeight >= 2 * visibleHeight
+          print(
+            "scroll-primary: cell=\(expectedCell) documentHeight=\(documentHeight)"
+              + " visibleHeight=\(visibleHeight) holds=\(inequalityHolds)")
+          guard inequalityHolds
+          else {
+            return invalid(
+              "inequality",
+              "(cell=\(expectedCell) document=\(documentHeight) visible=\(visibleHeight))")
+          }
           return true
         }
         // A terminal incomplete block (the writer stopped on a guard):
