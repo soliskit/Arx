@@ -34,6 +34,19 @@
 /// receipt landing is an association that bounds, not excludes, the
 /// write-failure branch.
 ///
+/// c21: comparative AppKit scroll-view evidence. The traversal records
+/// each encountered NSScrollView's frame (this block's audit-convention
+/// screen coordinates), its clip view's bounds and its document view's
+/// frame (both document coordinates), correlated by traversal index;
+/// "scroll-views: 0" records explicit absence. The records stay bounded
+/// by the existing traversal cap and the read limit, and carry no
+/// labels, identifiers or text. These are AppKit values captured once
+/// at dump time - a different measurement family AND a different time
+/// than the SwiftUI preference receipts, which are written on layout
+/// events. A dump-versus-receipt disagreement discriminates measurement
+/// families or capture timing; it does not conclusively establish a
+/// mechanism.
+///
 /// Fail-closed: it prints nothing unless ALL of the following hold - a DEBUG
 /// build, the runtime model is the fixture store (no EventKit store exists),
 /// and the explicit --arx-dump-view-hierarchy argument is present (only the
@@ -94,12 +107,18 @@ enum ViewHierarchyDump {
         ]
         var remaining = 300
         var depthCapped = false
+        var scrollRecords: [String] = []
         dump(
           content, depth: 0, in: window, screenHeight: NSScreen.main?.frame.height ?? 0,
-          lines: &lines, remaining: &remaining, depthCapped: &depthCapped)
+          lines: &lines, remaining: &remaining, depthCapped: &depthCapped,
+          scrollRecords: &scrollRecords)
         lines.append(
           "nodes: \(300 - remaining) node-truncated: \(remaining == 0)"
             + " depth-truncated: \(depthCapped)")
+        // c21: explicit count first, so zero scroll views records
+        // absence rather than silence; one bounded record per view.
+        lines.append("scroll-views: \(scrollRecords.count)")
+        lines.append(contentsOf: scrollRecords)
         let block =
           "ARX-VIEW-DUMP-v1-BEGIN\n" + lines.joined(separator: "\n")
           + "\nARX-VIEW-DUMP-v1-END\n"
@@ -148,7 +167,8 @@ enum ViewHierarchyDump {
 
     private static func dump(
       _ view: NSView, depth: Int, in window: NSWindow, screenHeight: CGFloat,
-      lines: inout [String], remaining: inout Int, depthCapped: inout Bool
+      lines: inout [String], remaining: inout Int, depthCapped: inout Bool,
+      scrollRecords: inout [String]
     ) {
       guard remaining > 0 else { return }
       guard depth <= 16 else {
@@ -156,6 +176,7 @@ enum ViewHierarchyDump {
         return
       }
       remaining -= 1
+      let nodeIndex = 300 - remaining
       let screen = window.convertToScreen(view.convert(view.bounds, to: nil))
       let audit = CGRect(
         x: screen.minX, y: screenHeight - screen.maxY, width: screen.width, height: screen.height)
@@ -175,10 +196,19 @@ enum ViewHierarchyDump {
           + " hasIdentifier=\(hasIdentifier)"
           + " hasLabel=\(hasLabel)"
           + " match=\(matches.isEmpty ? "-" : matches.joined(separator: ","))")
+      if let scrollView = view as? NSScrollView {
+        // c21: comparative record, correlated by traversal index. frame
+        // uses this block's audit-convention screen coordinates; clip
+        // bounds and document frame stay in document coordinates.
+        scrollRecords.append(
+          "scrollview node=\(nodeIndex) frame=\(audit)"
+            + " clip-bounds=\(scrollView.contentView.bounds)"
+            + " document-frame=\(scrollView.documentView.map { "\($0.frame)" } ?? "absent")")
+      }
       for subview in view.subviews {
         dump(
           subview, depth: depth + 1, in: window, screenHeight: screenHeight, lines: &lines,
-          remaining: &remaining, depthCapped: &depthCapped)
+          remaining: &remaining, depthCapped: &depthCapped, scrollRecords: &scrollRecords)
       }
     }
   #endif
