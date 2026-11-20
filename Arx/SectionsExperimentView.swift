@@ -232,6 +232,8 @@ nonisolated struct SectionsReply: Codable, Sendable {
     // names, the expected section name and the binding-verified returned name
     // are included per the owner's approval; no unrelated names, unrelated
     // reminder contents, IDs, free-text errors, raw worker output or logs.
+    // The source account title is local to the picker and never enters the
+    // report; the account binding checks stay internal.
     var lines = [
       "OS/build: " + ProcessInfo.processInfo.operatingSystemVersionString,
       "Status: " + status,
@@ -242,7 +244,7 @@ nonisolated struct SectionsReply: Codable, Sendable {
       lines.append("Permission: " + (Self.detailPhrases[detail] ?? "unrecognized status token"))
     }
     if let knownList {
-      lines.append("Test list: " + knownList.title + " (" + knownList.sourceTitle + ")")
+      lines.append("Test list: " + knownList.title)
     }
     if let knownItem {
       lines.append("Reminder: " + knownItem.title)

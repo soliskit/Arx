@@ -44,6 +44,8 @@ import Testing
     #expect(!model.report.contains("fixture-source"))
     #expect(model.report.contains("Reminder: Disposable Sections check"))
     #expect(model.report.contains("Expected section: PRIVATE section text"))
+    #expect(model.report.contains("Test list: Arx Test A"))
+    #expect(!model.report.contains("Fixture account"))
     let before = model.report
     model.loadLabels()
     model.locate()
