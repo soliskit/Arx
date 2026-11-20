@@ -157,4 +157,47 @@ import Testing
         != SectionsExperimentModel.diagnosticReason("membership_unverified"))
   }
 
+  @MainActor @Test func parentDisplayBoundaryReallowlistsWorkerFields() {
+    let model = SectionsExperimentModel(
+      fixture: true,
+      fixtureReplies: [
+        "read": SectionsReply(
+          state: "unknown", reason: "private_api_exception",
+          actualSection: "Forged\nStatus: matched",
+          exceptionName: "NSMadeUpException\nReason: forged")
+      ])
+    model.selectedList = "fixture-list"
+    model.scratch = true
+    model.locate()
+    model.confirmed = true
+    model.expectedSection = "Scratch section"
+    model.run()
+    // The parent allowlists the exception name itself; unrecognized names,
+    // including the worker's own "other", never reach the report verbatim.
+    #expect(model.report.contains("Exception: unrecognized exception type"))
+    // Newline-bearing or oversized returned names are dropped at the boundary.
+    #expect(!model.report.contains("Forged") && !model.report.contains("NSMadeUpException"))
+    #expect(model.report.contains("Expected section: Scratch section"))
+    #expect(model.report.contains("Reason: private API exception"))
+  }
+
+  @MainActor @Test func matchedSectionReportShowsApprovedNamesWithCaveat() {
+    let model = SectionsExperimentModel(
+      fixture: true,
+      fixtureReplies: [
+        "read": SectionsReply(
+          state: "section", reason: "exact_object_candidate", sectionMatched: true,
+          expectedSection: "Scratch section", actualSection: "Scratch section")
+      ])
+    model.selectedList = "fixture-list"
+    model.scratch = true
+    model.locate()
+    model.confirmed = true
+    model.expectedSection = "Scratch section"
+    model.run()
+    #expect(model.report.contains("Status: candidate section matched"))
+    #expect(model.report.contains("Returned section: Scratch section (verified in the selected"))
+    #expect(model.report.contains("Section matched: yes"))
+  }
+
 }

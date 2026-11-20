@@ -338,33 +338,122 @@ struct SectionsWorkerTransportTests {
     #expect(reply.reason == "fixture_no_provider")
   }
 
-  @Test func markersThenSignalNameTheBoundedInterval() async throws {
-    let artifacts = TempArtifacts()
-    defer { artifacts.removeAll() }
-    let child = try makeChild(
-      """
-      cat > /dev/null
-      printf 'stage=input.read.before\nstage=input.read.after\nstage=permission.check.before\n'
-      kill -TRAP $$
-      """, into: artifacts)
-    let reply = await call(child, action: "read", fields: Self.readFields)
-    #expect(reply.state == "unknown")
-    #expect(reply.reason == "child_signaled_5")
-    #expect(reply.stage == "during permission checking")
+  // One crash point per marker position of every action, plus the zero-marker
+  // case. Marker input comes from the production sequence table; every
+  // expected interval phrase below is hardcoded so the wording itself is
+  // tested, not rederived.
+  private struct CrashPoint: Sendable, CustomTestStringConvertible {
+    var action: String
+    var markerCount: Int
+    var expectedStage: String
+    var testDescription: String { "\(action) death after \(markerCount) markers" }
+
+    static let phrases: [String: [String]] = [
+      "labels": [
+        "during input read",
+        "after input read, before permission checking",
+        "during permission checking",
+        "after permission checking, before EventKit setup",
+        "during EventKit setup",
+        "after EventKit setup, before list enumeration",
+        "during list enumeration",
+        "after list enumeration, before label checking",
+        "during label checking",
+        "after label checking, before report encoding",
+        "during report encoding",
+        "after report encoding",
+      ],
+      "locate": [
+        "during input read",
+        "after input read, before permission checking",
+        "during permission checking",
+        "after permission checking, before EventKit setup",
+        "during EventKit setup",
+        "after EventKit setup, before list binding",
+        "during list binding",
+        "after list binding, before query setup",
+        "during query setup",
+        "after query setup, before reminder lookup",
+        "during reminder lookup",
+        "after reminder lookup, before reminder check",
+        "during reminder check",
+        "after reminder check, before report encoding",
+        "during report encoding",
+        "after report encoding",
+      ],
+      "read": [
+        "during input read",
+        "after input read, before permission checking",
+        "during permission checking",
+        "after permission checking, before EventKit setup",
+        "during EventKit setup",
+        "after EventKit setup, before list binding",
+        "during list binding",
+        "after list binding, before framework loading",
+        "during framework loading",
+        "after framework loading, before object selection",
+        "during object selection",
+        "after object selection, before section lookup",
+        "during section lookup",
+        "after section lookup, before report encoding",
+        "during report encoding",
+        "after report encoding",
+      ],
+    ]
+
+    static let all: [CrashPoint] = phrases.flatMap { action, expected in
+      let sequence = (SectionsWorkerTransport.expectedStages[action] ?? []).flatMap {
+        [$0 + ".before", $0 + ".after"]
+      }
+      precondition(
+        sequence.count == expected.count,
+        "hardcoded phrases must cover every marker position of \(action)")
+      return [
+        CrashPoint(
+          action: action, markerCount: 0,
+          expectedStage: SectionsWorkerTransport.noMarkerStage)
+      ]
+        + expected.indices.map { index in
+          CrashPoint(action: action, markerCount: index + 1, expectedStage: expected[index])
+        }
+    }
+
+    var script: String {
+      guard markerCount > 0 else { return "cat > /dev/null\nkill -TRAP $$" }
+      let sequence = (SectionsWorkerTransport.expectedStages[action] ?? []).flatMap {
+        [$0 + ".before", $0 + ".after"]
+      }
+      let printed = sequence.prefix(markerCount).map { "stage=" + $0 + "\\n" }.joined()
+      return "cat > /dev/null\nprintf '" + printed + "'\nkill -TRAP $$"
+    }
   }
 
-  @Test func afterMarkerComposesTheIntervalBetweenOperations() async throws {
+  @Test(arguments: CrashPoint.all) func deathAfterEveryMarkerPointNamesTheInterval(
+    point: CrashPoint
+  ) async throws {
+    let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
+    let child = try makeChild(point.script, into: artifacts)
+    let reply = await call(child, action: point.action, fields: Self.readFields)
+    #expect(reply.state == "unknown")
+    #expect(reply.reason == "child_signaled_5")
+    #expect(reply.stage == point.expectedStage)
+  }
+
+  @Test func decodedStageFromTheStreamIsAlwaysCleared() async throws {
     let artifacts = TempArtifacts()
     defer { artifacts.removeAll() }
     let child = try makeChild(
       """
       cat > /dev/null
-      printf 'stage=input.read.before\nstage=input.read.after\nstage=permission.check.before\nstage=permission.check.after\n'
-      kill -KILL $$
+      printf 'stage=input.read.before\n'
+      printf '%s' '{"state":"unknown","reason":"timeout","stage":"during FORGED injection"}'
+      exit 69
       """, into: artifacts)
     let reply = await call(child, action: "read", fields: Self.readFields)
-    #expect(reply.reason == "child_signaled_9")
-    #expect(reply.stage == "after permission checking, before EventKit setup")
+    #expect(reply.reason == "timeout")
+    // The stream's own stage claim never survives decoding.
+    #expect(reply.stage == nil)
   }
 
   @Test func outOfOrderMarkersAreMalformed() async throws {
@@ -518,5 +607,11 @@ struct SectionsWorkerTransportTests {
     #expect(
       SectionsExperimentModel.diagnosticReason("timeout")
         == "worker timed out; read unknown")
+    // Zero validated markers is stated as its own closed ambiguity.
+    #expect(
+      SectionsExperimentModel.diagnosticReason(
+        "timeout", stage: SectionsWorkerTransport.noMarkerStage)
+        == "worker timed out no stage marker received (checkpoint not reached or output lost); read unknown"
+    )
   }
 }

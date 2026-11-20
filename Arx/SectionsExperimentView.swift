@@ -199,6 +199,20 @@ nonisolated struct SectionsReply: Codable, Sendable {
     "status_other": "other",
   ]
 
+  // The parent re-allowlists every worker-supplied display field at this
+  // boundary; the stream is untrusted even when the worker also allowlists.
+  private static let allowedExceptionNames: Set<String> = [
+    "NSInvalidArgumentException", "NSInternalInconsistencyException",
+    "NSRangeException", "NSGenericException",
+  ]
+
+  private static func boundedName(_ value: String?) -> String? {
+    guard let value, !value.isEmpty, value.utf8.count <= 256,
+      !value.contains("\n"), !value.contains("\r")
+    else { return nil }
+    return value
+  }
+
   private func stop(_ reply: SectionsReply, action: String) {
     // Capture the disposable context before clearing selection state.
     let knownList = list
@@ -233,10 +247,10 @@ nonisolated struct SectionsReply: Codable, Sendable {
     if let knownItem {
       lines.append("Reminder: " + knownItem.title)
     }
-    if action == "read", !expected.isEmpty {
-      lines.append("Expected section: " + expected)
+    if action == "read", let expectedName = Self.boundedName(expected) {
+      lines.append("Expected section: " + expectedName)
     }
-    if let actual = reply.actualSection {
+    if action == "read", let actual = Self.boundedName(reply.actualSection) {
       lines.append(
         "Returned section: " + actual
           + " (verified in the selected test list and account; it may be a pre-existing section in that list)"
@@ -253,7 +267,9 @@ nonisolated struct SectionsReply: Codable, Sendable {
     }
     if let exception = reply.exceptionName {
       lines.append(
-        "Exception: " + (exception == "other" ? "unrecognized exception type" : exception))
+        "Exception: "
+          + (Self.allowedExceptionNames.contains(exception)
+            ? exception : "unrecognized exception type"))
     }
     lines.append("Section matched: " + (reply.sectionMatched == true ? "yes" : "not established"))
     report = lines.joined(separator: "\n")
@@ -356,6 +372,11 @@ enum SectionsWorkerTransport {
   nonisolated static let markerByteCap = 512
   nonisolated static let nonMarkerByteCap = 16384
   nonisolated static let aggregateByteCap = 16896
+  // Zero validated markers is its own closed wording, stated as-is: the child
+  // died before the first marker, or the marker output was lost. It is never
+  // silently folded into the plain no-stage phrases.
+  nonisolated static let noMarkerStage =
+    "no stage marker received (checkpoint not reached or output lost)"
   nonisolated static let expectedStages: [String: [String]] = [
     "labels": [
       "input.read", "permission.check", "store.create", "lists.enumerate",
@@ -597,30 +618,39 @@ enum SectionsWorkerTransport {
     if process.isRunning {
       kill(process.processIdentifier, SIGKILL)
       process.waitUntilExit()
-      return SectionsReply(state: "unknown", reason: "timeout", stage: split.stage)
+      return SectionsReply(
+        state: "unknown", reason: "timeout", stage: split.stage ?? noMarkerStage)
     }
     process.waitUntilExit()
     if !sawEOF {
       // The child exited but its output stream never closed before the deadline.
-      return SectionsReply(state: "unknown", reason: "timeout", stage: split.stage)
+      return SectionsReply(
+        state: "unknown", reason: "timeout", stage: split.stage ?? noMarkerStage)
     }
     if process.terminationReason == .exit && process.terminationStatus == 124 {
-      return SectionsReply(state: "unknown", reason: "timeout", stage: split.stage)
+      return SectionsReply(
+        state: "unknown", reason: "timeout", stage: split.stage ?? noMarkerStage)
     }
     // Each transport leg names its own fixed stop reason; none of these tokens
     // carries worker output, only the failed leg and a tiny status number.
     guard writeComplete else { return SectionsReply(state: "unknown", reason: "write_failed") }
     guard process.terminationReason == .exit else {
       return SectionsReply(
-        state: "unknown", reason: "child_signaled_\(process.terminationStatus)", stage: split.stage)
+        state: "unknown", reason: "child_signaled_\(process.terminationStatus)",
+        stage: split.stage ?? noMarkerStage)
     }
     guard [0, 69, 77].contains(process.terminationStatus) else {
       return SectionsReply(
-        state: "unknown", reason: "child_exit_\(process.terminationStatus)", stage: split.stage)
+        state: "unknown", reason: "child_exit_\(process.terminationStatus)",
+        stage: split.stage ?? noMarkerStage)
     }
-    guard let result = try? JSONDecoder().decode(SectionsReply.self, from: split.rest) else {
+    guard var result = try? JSONDecoder().decode(SectionsReply.self, from: split.rest) else {
       return SectionsReply(state: "unknown", reason: "output_undecodable")
     }
+    // The worker's JSON is untrusted: the interval stage is never accepted from
+    // the stream. A decoded reply always carries no stage; only the parent's
+    // own transport-fate replies attach one, composed from validated markers.
+    result.stage = nil
     return result
   }
 }

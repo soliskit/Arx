@@ -37,8 +37,16 @@ operation entered a private call or completed one. The parent validates the
 lines as an in-order subsequence of the expected per-action sequence, strips
 them, and composes a bounded interval phrase from the last complete line
 (`during <phrase>` or `after <phrase>, before <next phrase>`); a partial line
-at the end is treated as absent. Byte bounds fail closed: non-marker bytes are
-limited to 16384, complete marker lines to 512, and the aggregate buffered
+at the end is treated as absent. The interval stage is never accepted from the
+stream: a decoded reply's stage field is always cleared, and only the parent's
+own transport-fate replies carry the composed phrase. Zero validated markers
+on a transport fate is stated as its own closed ambiguity: "no stage marker
+received (checkpoint not reached or output lost)". Every worker-supplied
+display field is re-allowlisted at the report boundary: exception names outside
+the fixed list (including the token `other`) display as "unrecognized exception
+type", and the approved disposable-scope names display only when non-empty,
+single-line and at most 256 bytes. Byte bounds fail closed: non-marker bytes
+are limited to 16384, complete marker lines to 512, and the aggregate buffered
 output to 16896 at all times; any excess is `output_too_large`, and an
 out-of-order, duplicated or misplaced marker sequence is `output_undecodable`.
 The exchange completes only when the output stream has closed and
@@ -166,9 +174,10 @@ the actual Swift parent transport against synthetic script children: input
 delivery, accepted and refused exit statuses, signal death, malformed and
 oversized output, launch failure, early stdin close, a large valid reply across
 pipe capacity, a descendant holding the output pipe, the 10-second parent
-deadline and single-launch behavior, the fixed marker protocol (interval
-phrasing after a signal, in-order subsequence validation, marker-byte and
-non-marker bounds, partial-line handling) plus
+deadline and single-launch behavior, the fixed marker protocol (a parametrized
+crash point after every marker position of every action plus the zero-marker
+case, in-order subsequence validation, marker-byte and non-marker bounds,
+partial-line handling, decoded-stage clearing and parent re-allowlisting) plus
 one same-app fixture-worker smoke. Every fixture script, directory and counter
 file a test creates is removed when that test finishes. A child that exits at its own deadline (124)
 is reported with the fixed `timeout` reason instead of generic
