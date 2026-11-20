@@ -3,9 +3,34 @@
 #import <objc/runtime.h>
 #include "gates.h"
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #if !defined(ARX_SECTION_READER_FIXTURES)
 #import <EventKit/EventKit.h>
 #endif
+
+// Same fixed-marker discipline as Worker.m: raw complete lines, in program
+// order, before the result; reached-only semantics; lost writes are ignored.
+static void marker(NSString *operation, BOOL after) {
+    NSString *line = [NSString stringWithFormat:@"stage=%@.%@\n", operation, after ? @"after" : @"before"];
+    const char *p = line.UTF8String;
+    size_t remaining = strlen(p);
+    while (remaining) {
+        ssize_t count = write(STDOUT_FILENO, p, remaining);
+        if (count <= 0) return;
+        remaining -= (size_t)count;
+        p += count;
+    }
+}
+// Structured error detail: allowlisted domain/exception names or the fixed
+// token "other". Never a raw domain, name or any free text.
+static NSString *domainToken(NSString *domain) {
+    return [@[@"EKErrorDomain", @"NSCocoaErrorDomain"] containsObject:domain] ? domain : @"other";
+}
+static NSString *exceptionToken(NSString *name) {
+    return [@[@"NSInvalidArgumentException", @"NSInternalInconsistencyException",
+              @"NSRangeException", @"NSGenericException"] containsObject:name] ? name : @"other";
+}
 
 static NSDictionary *unknown(NSString *reason) {
     return @{ @"state": @"unknown", @"reason": reason };
@@ -95,6 +120,7 @@ static id storeFor(id reminder) {
         for (NSString *key in @[@"sourceID", @"listID", @"reminderID"]) {
             if (!exactText(request[key], grant[key])) return unknown(@"denied");
         }
+        marker(@"objects.bind", NO);
 #if !defined(ARX_SECTION_READER_FIXTURES)
         if (![calendar isKindOfClass:EKCalendar.class] || ![reminder isKindOfClass:EKReminder.class])
             return unknown(@"identity_unverified");
@@ -118,6 +144,11 @@ static id storeFor(id reminder) {
         if (backing(calendar, @"REMList") != list || backing(reminder, @"REMReminder") != item ||
             !eventKitBound(calendar, reminder, request))
             return unknown(@"identity_unverified");
+        marker(@"objects.bind", YES);
+        // The section lookup covers exact-store resolution, the guarded view
+        // and the single membership call. The after marker fires when the
+        // call returns; it never proves the call completed a transaction.
+        marker(@"membership.call", NO);
         id store = storeFor(item);
         if (!store) return unknown(@"unavailable");
         id view = nil;
@@ -134,7 +165,12 @@ static id storeFor(id reminder) {
         NSError *error = nil;
         id section = ((id (*)(id, SEL, id, NSError **))objc_msgSend)(
             view, NSSelectorFromString(selector), get(item, @"remObjectID"), &error);
-        if (error || !section) return unknown(@"membership_unverified");
+        marker(@"membership.call", YES);
+        if (error || !section) {
+            if (!error) return unknown(@"membership_unverified");
+            return @{ @"state": @"unknown", @"reason": @"membership_unverified",
+                @"errorDomain": domainToken(error.domain), @"errorCode": @(error.code) };
+        }
         if (backing(calendar, @"REMList") != list || backing(reminder, @"REMReminder") != item ||
             !exactText(identifier(get(item, @"list"), @"REMCDList"), listID) ||
             !exactText(identifier(get(item, @"account"), @"REMCDAccount"), accountID) ||
@@ -150,11 +186,15 @@ static id storeFor(id reminder) {
         if (!expected) return unknown(@"identity_unverified");
         NSString *actualName = text(get(section, @"displayName"));
         if (!actualName) return unknown(@"membership_unverified");
-        // Fixed output only. No names, titles, account IDs, exceptions or store paths.
-        return @{ @"state": @"section", @"reason": @"exact_object_candidate", @"sectionMatched": @([actualName isEqual:expected]) };
+        // Owner-approved disposable-scope capture: the expected and returned
+        // names ride with the match boolean. The returned name is verified to
+        // the selected list/account above but may be a pre-existing section.
+        return @{ @"state": @"section", @"reason": @"exact_object_candidate",
+            @"sectionMatched": @([actualName isEqual:expected]),
+            @"expectedSection": expected, @"actualSection": actualName };
     } @catch (NSException *exception) {
-        (void)exception;
-        return unknown(@"private_api_exception");
+        return @{ @"state": @"unknown", @"reason": @"private_api_exception",
+            @"exceptionName": exceptionToken(exception.name) };
     }
 }
 @end

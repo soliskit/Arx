@@ -84,6 +84,16 @@ nonisolated struct SectionsReply: Codable, Sendable {
   var lists: [SectionsList]?
   var item: SectionsItem?
   var sectionMatched: Bool?
+  // Approved disposable-scope capture and structured error detail. The worker
+  // may send these; stage is only ever composed by the parent from validated
+  // marker lines, never accepted from the stream.
+  var expectedSection: String?
+  var actualSection: String?
+  var detail: String?
+  var errorDomain: String?
+  var errorCode: Int?
+  var exceptionName: String?
+  var stage: String?
 }
 
 @MainActor @Observable final class SectionsExperimentModel {
@@ -182,26 +192,77 @@ nonisolated struct SectionsReply: Codable, Sendable {
     }
   }
 
+  private static let detailPhrases = [
+    "status_not_determined": "not determined",
+    "status_restricted": "restricted",
+    "status_denied": "denied",
+    "status_other": "other",
+  ]
+
   private func stop(_ reply: SectionsReply, action: String) {
+    // Capture the disposable context before clearing selection state.
+    let knownList = list
+    let knownItem = item
+    let expected = expectedSection
     finished = true
     item = nil
     lists = []
     confirmed = false
-    let reason = Self.diagnosticReason(reply.reason)
+    let reason = Self.diagnosticReason(reply.reason, stage: reply.stage)
     let step = ["labels": "labels", "locate": "selection", "read": "read"][action] ?? "unknown"
     message = "Experiment stopped. " + step + ": " + reason
     let status =
       reply.state == "section" && reply.sectionMatched == true
       ? "candidate section matched" : "unknown or mismatch - stopped"
-    // Only this report may leave the Mac. No worker output, IDs, text or logs.
-    report =
-      "OS/build: " + ProcessInfo.processInfo.operatingSystemVersionString + "\nStatus: " + status
-      + "\nStep: " + step + "\nReason: " + reason
-      + "\nSection matched: " + (reply.sectionMatched == true ? "yes" : "not established")
+    // Only this report may leave the Mac. The disposable test list/reminder
+    // names, the expected section name and the binding-verified returned name
+    // are included per the owner's approval; no unrelated names, unrelated
+    // reminder contents, IDs, free-text errors, raw worker output or logs.
+    var lines = [
+      "OS/build: " + ProcessInfo.processInfo.operatingSystemVersionString,
+      "Status: " + status,
+      "Step: " + step,
+      "Reason: " + reason,
+    ]
+    if let detail = reply.detail {
+      lines.append("Permission: " + (Self.detailPhrases[detail] ?? "unrecognized status token"))
+    }
+    if let knownList {
+      lines.append("Test list: " + knownList.title + " (" + knownList.sourceTitle + ")")
+    }
+    if let knownItem {
+      lines.append("Reminder: " + knownItem.title)
+    }
+    if action == "read", !expected.isEmpty {
+      lines.append("Expected section: " + expected)
+    }
+    if let actual = reply.actualSection {
+      lines.append(
+        "Returned section: " + actual
+          + " (verified in the selected test list and account; it may be a pre-existing section in that list)"
+      )
+    }
+    if let domain = reply.errorDomain {
+      let phrase =
+        domain == "EKErrorDomain"
+        ? "EventKit error"
+        : domain == "NSCocoaErrorDomain" ? "Cocoa error" : "unrecognized error domain"
+      var line = "Error: " + phrase
+      if let code = reply.errorCode { line += " code \(code)" }
+      lines.append(line)
+    }
+    if let exception = reply.exceptionName {
+      lines.append(
+        "Exception: " + (exception == "other" ? "unrecognized exception type" : exception))
+    }
+    lines.append("Section matched: " + (reply.sectionMatched == true ? "yes" : "not established"))
+    report = lines.joined(separator: "\n")
   }
 
   // Closed vocabulary at the final display/copy boundary. Never echo worker text.
-  static func diagnosticReason(_ reason: String) -> String {
+  static func diagnosticReason(_ reason: String, stage: String? = nil) -> String {
+    // The interval phrase is parent-composed from validated marker lines only.
+    let interval = stage.map { " " + $0 } ?? ""
     // Numbered child fates are fixed tokens too: ASCII digits only, and the
     // number is all that ever crosses this boundary.
     for (prefix, phrase) in [
@@ -211,7 +272,7 @@ nonisolated struct SectionsReply: Codable, Sendable {
       guard !digits.isEmpty, digits.allSatisfy({ $0 >= "0" && $0 <= "9" }) else {
         return "unrecognized result; read unknown"
       }
-      return phrase + digits + "; read unknown"
+      return phrase + digits + interval + "; read unknown"
     }
     return switch reason {
     case "existing_permission_unavailable": "existing permission unavailable"
@@ -221,13 +282,16 @@ nonisolated struct SectionsReply: Codable, Sendable {
     case "selection_timeout": "selection timed out"
     case "selection_not_exactly_one": "expected one reminder"
     case "identity_unverified": "object binding unverified"
+    case "identity_list_unverified": "list identity unverified"
+    case "identity_source_unverified": "account identity unverified"
+    case "identity_title_unverified": "title identity unverified"
     case "private_framework_unavailable": "private framework unavailable"
     case "membership_api_unavailable": "membership API unavailable"
     case "membership_unverified": "membership unverified"
     case "section_name_mismatch": "expected section did not match"
     case "private_api_exception": "private API exception"
     case "denied": "scope refused"
-    case "timeout": "worker timed out; read unknown"
+    case "timeout": "worker timed out" + interval + "; read unknown"
     case "worker_unavailable": "worker result unavailable; read unknown"
     case "spawn_unavailable": "worker launch unavailable; read unknown"
     case "input_unavailable": "worker input unavailable; read unknown"
@@ -282,6 +346,106 @@ nonisolated struct SectionsReply: Codable, Sendable {
 // The child is this SAME app executable, signed with the existing app identity.
 // It has no GUI, listener or permission request. Missing inherited access refuses.
 enum SectionsWorkerTransport {
+  // Fixed marker protocol: the worker emits complete lines "stage=<op>.<before|after>"
+  // in program order, all before the result JSON. The parent validates them as
+  // an in-order subsequence of the expected per-action sequence and composes a
+  // bounded interval phrase from the last complete line. Byte bounds, fail
+  // closed: non-marker bytes <= 16384, complete marker lines <= 512, and the
+  // aggregate buffer <= 16896 at all times, so no partial or unknown line can
+  // accumulate without bound.
+  nonisolated static let markerByteCap = 512
+  nonisolated static let nonMarkerByteCap = 16384
+  nonisolated static let aggregateByteCap = 16896
+  nonisolated static let expectedStages: [String: [String]] = [
+    "labels": [
+      "input.read", "permission.check", "store.create", "lists.enumerate",
+      "labels.validate", "reply.encode",
+    ],
+    "locate": [
+      "input.read", "permission.check", "store.create", "calendar.bind",
+      "predicate.create", "reminders.fetch", "row.check", "reply.encode",
+    ],
+    "read": [
+      "input.read", "permission.check", "store.create", "calendar.bind",
+      "framework.load", "objects.bind", "membership.call", "reply.encode",
+    ],
+  ]
+  nonisolated static let stagePhrases: [String: String] = [
+    "input.read": "input read",
+    "permission.check": "permission checking",
+    "store.create": "EventKit setup",
+    "lists.enumerate": "list enumeration",
+    "labels.validate": "label checking",
+    "reply.encode": "report encoding",
+    "calendar.bind": "list binding",
+    "predicate.create": "query setup",
+    "reminders.fetch": "reminder lookup",
+    "row.check": "reminder check",
+    "framework.load": "framework loading",
+    "objects.bind": "object selection",
+    "membership.call": "section lookup",
+  ]
+
+  nonisolated struct MarkerSplit: Sendable {
+    var stage: String?
+    var rest: Data
+    var overflow: Bool
+    var malformed: Bool
+  }
+
+  nonisolated static func splitMarkers(_ output: Data, action: String) -> MarkerSplit {
+    let operations = expectedStages[action] ?? []
+    let expected = operations.flatMap { [$0 + ".before", $0 + ".after"] }
+    var markers: [String] = []
+    var markerBytes = 0
+    var rest = output
+    // A line still open at 33+ bytes can never be a valid marker and stays in
+    // the non-marker rest; a partial line at the end likewise stays behind.
+    while let newline = rest.prefix(33).firstIndex(of: 0x0A) {
+      let line = rest[...newline]
+      guard line.count <= 32,
+        let text = String(data: line, encoding: .utf8),
+        text.hasPrefix("stage="), text.hasSuffix("\n")
+      else { break }
+      let token = String(text.dropFirst(6).dropLast(1))
+      guard expected.contains(token) else { break }
+      markers.append(token)
+      markerBytes += line.count
+      if markerBytes > markerByteCap {
+        return MarkerSplit(stage: nil, rest: output, overflow: true, malformed: false)
+      }
+      rest = Data(rest.dropFirst(line.count))
+    }
+    if rest.count > nonMarkerByteCap {
+      return MarkerSplit(stage: nil, rest: output, overflow: true, malformed: false)
+    }
+    // The received lines must form an in-order subsequence of the expected
+    // sequence: out-of-order, duplicate or unknown-position markers are
+    // malformed output, never silently absorbed.
+    var cursor = 0
+    for token in markers {
+      guard let hit = expected[cursor...].firstIndex(of: token) else {
+        return MarkerSplit(stage: nil, rest: output, overflow: false, malformed: true)
+      }
+      cursor = hit + 1
+    }
+    var stage: String?
+    if let last = markers.last {
+      let isBefore = last.hasSuffix(".before")
+      let operation = String(last.dropLast(isBefore ? 7 : 6))
+      let phrase = stagePhrases[operation] ?? operation
+      if isBefore {
+        stage = "during " + phrase
+      } else if let index = operations.firstIndex(of: operation), index + 1 < operations.count {
+        let next = stagePhrases[operations[index + 1]] ?? operations[index + 1]
+        stage = "after " + phrase + ", before " + next
+      } else {
+        stage = "after " + phrase
+      }
+    }
+    return MarkerSplit(stage: stage, rest: rest, overflow: false, malformed: false)
+  }
+
   nonisolated static func call(action: String, fields: [String: String]) -> SectionsReply {
     guard let executable = Bundle.main.executableURL else {
       return SectionsReply(state: "unknown", reason: "spawn_unavailable")
@@ -371,9 +535,9 @@ enum SectionsWorkerTransport {
     }
     try? stdin.fileHandleForWriting.close()
     // Drain stdout while the child runs so a full pipe can never stall it into
-    // the deadline; bytes past the 16-KiB bound are counted and discarded. Each
-    // read rechecks the deadline, so even a continuously writing child cannot
-    // hold the parent past it.
+    // the deadline; bytes past the aggregate bound are counted and discarded.
+    // Each read rechecks the deadline, so even a continuously writing child
+    // cannot hold the parent past it.
     var output = Data()
     var total = 0
     var sawEOF = false
@@ -384,8 +548,8 @@ enum SectionsWorkerTransport {
         let count = chunk.withUnsafeMutableBytes { read(descriptor, $0.baseAddress, $0.count) }
         if count > 0 {
           total += count
-          if output.count < 16384 {
-            output.append(contentsOf: chunk.prefix(min(count, 16384 - output.count)))
+          if output.count < aggregateByteCap {
+            output.append(contentsOf: chunk.prefix(min(count, aggregateByteCap - output.count)))
           }
         } else if count == 0 {
           sawEOF = true
@@ -412,30 +576,49 @@ enum SectionsWorkerTransport {
       }
       return SectionsReply(state: "unknown", reason: "read_failed")
     }
+    // Marker extraction happens before fate classification so a stopped child
+    // can name the bounded interval it reached. Overflow and malformed marker
+    // sequences fail closed here, after any needed kill.
+    let split = splitMarkers(output, action: action)
+    if split.overflow || total > aggregateByteCap {
+      if process.isRunning {
+        kill(process.processIdentifier, SIGKILL)
+        process.waitUntilExit()
+      }
+      return SectionsReply(state: "unknown", reason: "output_too_large")
+    }
+    if split.malformed {
+      if process.isRunning {
+        kill(process.processIdentifier, SIGKILL)
+        process.waitUntilExit()
+      }
+      return SectionsReply(state: "unknown", reason: "output_undecodable")
+    }
     if process.isRunning {
       kill(process.processIdentifier, SIGKILL)
       process.waitUntilExit()
-      return SectionsReply(state: "unknown", reason: "timeout")
+      return SectionsReply(state: "unknown", reason: "timeout", stage: split.stage)
     }
     process.waitUntilExit()
     if !sawEOF {
       // The child exited but its output stream never closed before the deadline.
-      return SectionsReply(state: "unknown", reason: "timeout")
+      return SectionsReply(state: "unknown", reason: "timeout", stage: split.stage)
     }
     if process.terminationReason == .exit && process.terminationStatus == 124 {
-      return SectionsReply(state: "unknown", reason: "timeout")
+      return SectionsReply(state: "unknown", reason: "timeout", stage: split.stage)
     }
     // Each transport leg names its own fixed stop reason; none of these tokens
     // carries worker output, only the failed leg and a tiny status number.
     guard writeComplete else { return SectionsReply(state: "unknown", reason: "write_failed") }
-    guard total <= 16384 else { return SectionsReply(state: "unknown", reason: "output_too_large") }
     guard process.terminationReason == .exit else {
-      return SectionsReply(state: "unknown", reason: "child_signaled_\(process.terminationStatus)")
+      return SectionsReply(
+        state: "unknown", reason: "child_signaled_\(process.terminationStatus)", stage: split.stage)
     }
     guard [0, 69, 77].contains(process.terminationStatus) else {
-      return SectionsReply(state: "unknown", reason: "child_exit_\(process.terminationStatus)")
+      return SectionsReply(
+        state: "unknown", reason: "child_exit_\(process.terminationStatus)", stage: split.stage)
     }
-    guard let result = try? JSONDecoder().decode(SectionsReply.self, from: output) else {
+    guard let result = try? JSONDecoder().decode(SectionsReply.self, from: split.rest) else {
       return SectionsReply(state: "unknown", reason: "output_undecodable")
     }
     return result

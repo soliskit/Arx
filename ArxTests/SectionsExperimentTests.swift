@@ -133,7 +133,15 @@ import Testing
         #expect(model.report.contains("Step: " + step))
         #expect(
           model.report.contains("Reason: " + SectionsExperimentModel.diagnosticReason(reason)))
-        #expect(!model.report.contains("PRIVATE") && !model.message.contains("PRIVATE"))
+        // The unrecognized reason's canary text never crosses into the report.
+        // The owner-approved expected section name appears only on a read stop.
+        #expect(!model.report.contains("PRIVATE reminder name and ID"))
+        #expect(!model.message.contains("PRIVATE"))
+        if action == "read" {
+          #expect(model.report.contains("Expected section: PRIVATE section"))
+        } else {
+          #expect(!model.report.contains("PRIVATE"))
+        }
         #expect(!model.report.contains("fixture-list") && !model.report.contains("fixture-source"))
         let stopped = model.report
         model.loadLabels()

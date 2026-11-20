@@ -6,16 +6,46 @@ static inline NSDictionary *ARXSectionDiagnostic(NSDictionary *result) {
         if ([result[@"state"] isEqual:@"section"] &&
             [result[@"sectionMatched"] isKindOfClass:NSNumber.class]) {
             BOOL match = [result[@"sectionMatched"] isEqual:@YES];
-            return @{ @"state": match ? @"section" : @"unknown",
+            NSMutableDictionary *clean = [@{ @"state": match ? @"section" : @"unknown",
                 @"reason": match ? @"exact_object_candidate" : @"section_name_mismatch",
-                @"sectionMatched": @(match) };
+                @"sectionMatched": @(match) } mutableCopy];
+            // Owner-approved disposable-scope names, bounded plain text only.
+            // The returned name is verified to the selected list/account by the
+            // reader but may be a pre-existing section in that list.
+            NSString *expected = result[@"expectedSection"];
+            NSString *actual = result[@"actualSection"];
+            if ([expected isKindOfClass:NSString.class] && expected.length > 0 && expected.length <= 256 &&
+                [actual isKindOfClass:NSString.class] && actual.length > 0 && actual.length <= 256) {
+                clean[@"expectedSection"] = expected;
+                clean[@"actualSection"] = actual;
+            }
+            return clean;
         }
         NSString *reason = result[@"reason"];
         if ([result[@"state"] isEqual:@"unknown"] && [reason isKindOfClass:NSString.class]) {
             if ([reason isEqual:@"unavailable"]) reason = @"membership_api_unavailable";
-            if ([@[@"denied", @"identity_unverified", @"membership_api_unavailable",
-                   @"membership_unverified", @"private_api_exception"] containsObject:reason])
-                return @{ @"state": @"unknown", @"reason": reason, @"sectionMatched": @NO };
+            if ([@[@"denied", @"identity_unverified", @"identity_list_unverified",
+                   @"identity_source_unverified", @"identity_title_unverified",
+                   @"membership_api_unavailable", @"membership_unverified",
+                   @"private_api_exception"] containsObject:reason]) {
+                NSMutableDictionary *clean =
+                    [@{ @"state": @"unknown", @"reason": reason, @"sectionMatched": @NO } mutableCopy];
+                // Structured error detail only: allowlisted domain/exception
+                // names or the fixed token "other", and an integer code.
+                NSString *domain = result[@"errorDomain"];
+                if (domain != nil &&
+                    [@[@"EKErrorDomain", @"NSCocoaErrorDomain", @"other"] containsObject:domain]) {
+                    clean[@"errorDomain"] = domain;
+                    NSNumber *code = result[@"errorCode"];
+                    if ([code isKindOfClass:NSNumber.class]) clean[@"errorCode"] = code;
+                }
+                NSString *exception = result[@"exceptionName"];
+                if (exception != nil &&
+                    [@[@"NSInvalidArgumentException", @"NSInternalInconsistencyException",
+                       @"NSRangeException", @"NSGenericException", @"other"] containsObject:exception])
+                    clean[@"exceptionName"] = exception;
+                return clean;
+            }
         }
     }
     return @{ @"state": @"unknown", @"reason": @"worker_unavailable", @"sectionMatched": @NO };

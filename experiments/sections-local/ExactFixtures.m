@@ -84,7 +84,7 @@ int main(void) {
         NSDictionary *positive = READ();
         expect([positive[@"state"] isEqual:@"section"], "exact-object binding accepts different namespaces");
         expect(view.calls == 1, "one bounded membership fetch");
-        expect(positive.count == 3 && !positive[@"sourceID"] && !positive[@"accountID"] && !positive[@"sectionID"] && [positive[@"sectionMatched"] isEqual:@YES], "fixed sanitized fields");
+        expect(positive.count == 5 && !positive[@"sourceID"] && !positive[@"accountID"] && !positive[@"sectionID"] && [positive[@"sectionMatched"] isEqual:@YES] && [positive[@"expectedSection"] isEqual:@"Scratch section"] && [positive[@"actualSection"] isEqual:@"Scratch section"], "fixed sanitized fields plus approved names");
         for (NSString *key in @[@"sourceID", @"listID", @"reminderID", @"read"]) {
             id original = grant[key];
             for (id bad in @[[NSNull null], @NO, @"wrong", @42, @[]]) {
@@ -129,9 +129,10 @@ int main(void) {
         expect([READ()[@"sectionMatched"] isEqual:@NO], "section mismatch is not success");
         section.displayName = @"Scratch section";
         view.section = nil; expect([READ()[@"state"] isEqual:@"unknown"], "nil never none"); view.section = section;
-        view.returnsError = YES; expect([READ()[@"state"] isEqual:@"unknown"], "error never positive"); view.returnsError = NO;
+        view.returnsError = YES; NSDictionary *errored = READ();
+        expect([errored[@"state"] isEqual:@"unknown"] && [errored[@"errorDomain"] isEqual:@"other"] && [errored[@"errorCode"] isEqual:@1], "error never positive; structured detail only"); view.returnsError = NO;
         view.throws = YES; NSDictionary *failure = READ();
-        expect([failure[@"reason"] isEqual:@"private_api_exception"] && failure.count == 2, "exception sanitized");
+        expect([failure[@"reason"] isEqual:@"private_api_exception"] && failure.count == 3 && [failure[@"exceptionName"] isEqual:@"other"], "exception sanitized");
         expect(![[failure description] containsString:@"PRIVATE-SENSITIVE"], "no exception disclosure"); view.throws = NO;
         expect([READ()[@"state"] isEqual:@"section"], "fresh read recovers after exception");
         for (NSString *reason in @[@"denied", @"identity_unverified", @"membership_unverified", @"private_api_exception"]) {
@@ -142,6 +143,23 @@ int main(void) {
         expect([ARXSectionDiagnostic(@{@"state": @"unknown", @"reason": @"unavailable"})[@"reason"] isEqual:@"membership_api_unavailable"], "API absence distinct");
         expect([ARXSectionDiagnostic(@{@"state": @"section", @"sectionMatched": @NO})[@"reason"] isEqual:@"section_name_mismatch"], "mismatch distinct");
         expect([ARXSectionDiagnostic(positive)[@"sectionMatched"] isEqual:@YES], "positive preserved");
+        expect(ARXSectionDiagnostic(positive).count == 5, "approved names preserved");
+        for (NSString *sub in @[@"identity_list_unverified", @"identity_source_unverified", @"identity_title_unverified"]) {
+            expect([ARXSectionDiagnostic(@{@"state": @"unknown", @"reason": sub})[@"reason"] isEqual:sub], "identity sub-reason preserved");
+        }
+        NSDictionary *withDomain = ARXSectionDiagnostic(@{@"state": @"unknown", @"reason": @"membership_unverified",
+            @"errorDomain": @"EKErrorDomain", @"errorCode": @42});
+        expect([withDomain[@"errorDomain"] isEqual:@"EKErrorDomain"] && [withDomain[@"errorCode"] isEqual:@42], "allowlisted domain and code preserved");
+        expect(ARXSectionDiagnostic(@{@"state": @"unknown", @"reason": @"membership_unverified",
+            @"errorDomain": @"PRIVATE-SENSITIVE", @"errorCode": @1})[@"errorDomain"] == nil, "unrecognized domain dropped");
+        expect(ARXSectionDiagnostic(@{@"state": @"unknown", @"reason": @"private_api_exception",
+            @"exceptionName": @"PRIVATE-SENSITIVE"})[@"exceptionName"] == nil, "unrecognized exception dropped");
+        expect(ARXSectionDiagnostic(@{@"state": @"section", @"sectionMatched": @YES,
+            @"expectedSection": @"EXP"})[@"actualSection"] == nil, "partial names dropped");
+        NSMutableString *longName = [NSMutableString stringWithCapacity:300];
+        for (int i = 0; i < 257; i++) [longName appendString:@"x"];
+        expect(ARXSectionDiagnostic(@{@"state": @"section", @"sectionMatched": @YES,
+            @"expectedSection": longName, @"actualSection": @"EXP"})[@"expectedSection"] == nil, "oversized names dropped");
         for (id bad in @[@{}, @{@"state": @"unknown", @"reason": @"PRIVATE-SENSITIVE"}, @{@"state": @"section", @"sectionMatched": @"PRIVATE-SENSITIVE"}]) {
             NSDictionary *r = ARXSectionDiagnostic(bad);
             expect([r[@"reason"] isEqual:@"worker_unavailable"], "malformed diagnostic refused");
