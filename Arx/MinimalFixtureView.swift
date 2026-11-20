@@ -277,8 +277,9 @@
     /// the window's first responder is displaced to nil, so the only
     /// intended difference from the origin-field cell at audit time is
     /// the field's Keyboard Focused attribute. The displacement is
-    /// verified per run by the additive focus print, the window render
-    /// and the tree comparison; without that evidence the cell is
+    /// verified per run by the app-side first-responder descriptor
+    /// prints and the window render, plus the tree comparison when a
+    /// mismatch dump exists; without that evidence the cell is
     /// invalid, not negative.
     private var connectionOriginFieldUnfocusedRequested: Bool {
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-connection-origin-field-unfocused")
@@ -358,6 +359,40 @@
               enabled: axGroupRequested)
           )
           .background(detailProbe)
+      }
+      .onAppear(perform: recordFirstResponderPhases)
+    }
+
+    /// Additive observation (delta 14 repair): record the key window's
+    /// first responder as a STABLE descriptor at the same three short
+    /// delays the displacement contrast issues, for every cell, so the
+    /// focus state near audit time is comparable across runs and
+    /// across the displacement boundary. Observation only, never an
+    /// assertion; the descriptor is a fixed token ("no-key-window",
+    /// "none", or "window" when the window itself is the responder)
+    /// or the responder's class name - never an address, frame or
+    /// label. A focused text field typically reports AppKit's shared
+    /// field editor (NSTextView); displaced focus reports the window
+    /// or no useful responder. Interpretation stays observation: the
+    /// tree's Keyboard Focused attribute remains the per-element
+    /// evidence.
+    private func recordFirstResponderPhases() {
+      for (index, delay) in [0.0, 0.5, 1.0].enumerated() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+          guard let window = NSApplication.shared.keyWindow else {
+            print("pre-audit-first-responder-\(index): no-key-window")
+            return
+          }
+          let descriptor: String
+          if let responder = window.firstResponder {
+            descriptor =
+              responder === window
+              ? "window" : String(describing: type(of: responder))
+          } else {
+            descriptor = "none"
+          }
+          print("pre-audit-first-responder-\(index): \(descriptor)")
+        }
       }
     }
 
@@ -723,10 +758,11 @@
     /// behavior is the DEBUG-only first-responder displacement below.
     /// SwiftUI assigns initial focus to the lone field when the window
     /// appears, so the displacement is issued immediately and twice
-    /// more on short delays; the additive focus print, the window
-    /// render and the tree comparison establish per run whether the
-    /// field was unfocused at audit time. onAppear adds no element to
-    /// the view tree.
+    /// more on short delays; the app-side first-responder descriptor
+    /// prints and the window render establish per run whether the
+    /// field was unfocused at audit time, with the tree comparison
+    /// when a mismatch dump exists. onAppear adds no element to the
+    /// view tree.
     @ViewBuilder private var connectionOriginFieldUnfocusedDetail: some View {
       connectionOriginFieldDetail
         .onAppear {

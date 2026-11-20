@@ -761,13 +761,6 @@ final class ArxUITests: XCTestCase {
     // cell, because the no-scroll family demonstrated that geometry
     // varies with content. Observation only, never an assertion.
     print("pre-audit-window-frame: \(application.windows["main"].frame)")
-    // Additive observation (delta 14): record keyboard focus on text
-    // fields at audit time, because the single-field cells
-    // demonstrated that the lone field takes focus. Observation only,
-    // never an assertion.
-    let textFields = application.textFields.allElementsBoundByIndex
-    let focusedTextFields = textFields.filter { $0.hasFocus }
-    print("pre-audit-focused-text-fields: \(focusedTextFields.count) of \(textFields.count)")
     let auditPNG = application.screenshot().pngRepresentation
     let artifacts = URL(fileURLWithPath: "/tmp/uitest-artifacts")
     try? FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
