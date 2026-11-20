@@ -556,17 +556,20 @@
     /// caption-context pair. The text is the verbatim failing caption
     /// from plainDetail (same string, font and default foreground),
     /// mounted alone so its frame is deterministic. The transparent
-    /// spacers replicate the GroupBox title region and content insets
-    /// measured from the connection-chrome cell's render (24pt title
-    /// region above the text, 6pt leading inset), so the text's frame
-    /// matches the GroupBox half's content frame BY CONSTRUCTION;
-    /// the UI test still records the actual frame, and any mismatch
+    /// spacers replicate the GroupBox title region and content insets.
+    /// The first values (24pt/6pt) were measured from the
+    /// connection-chrome render; the actual recorded AX frames in the
+    /// pair's CI run - GroupBox target (351, 240, 122, 13) versus this
+    /// half's (352, 242, 122, 13) - showed the text 1pt right and 2pt
+    /// low, so the spacers are corrected to 22pt vertical and 5pt
+    /// leading to match the GroupBox half's recorded frame exactly.
+    /// The UI test still records the actual frame, and any mismatch
     /// makes the comparison inconclusive, never negative.
     @ViewBuilder private var captionContextPlainDetail: some View {
       VStack(alignment: .leading, spacing: 0) {
-        Color.clear.frame(height: 24)
+        Color.clear.frame(height: 22)
         HStack(alignment: .top, spacing: 0) {
-          Color.clear.frame(width: 6)
+          Color.clear.frame(width: 5)
           Text("Fixture small caption text")
             .font(.caption)
             .accessibilityIdentifier("caption-context-target")
