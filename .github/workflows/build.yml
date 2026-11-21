@@ -137,7 +137,7 @@ jobs:
           else
             echo "ui=false" >> "$GITHUB_OUTPUT"
           fi
-          if printf '%s\n' "$changed" | grep -Eq '^(BridgeCore/|Package\.swift|Package\.resolved|scripts/browser-proof-safari\.mjs|scripts/browser-outcomes\.mjs|scripts/browser-edits\.mjs|^\.github/workflows/build\.yml$)'; then
+          if printf '%s\n' "$changed" | grep -Eq '^(BridgeCore/|BridgeFixtureServer/|Package\.swift|Package\.resolved|scripts/browser-proof-safari\.mjs|scripts/browser-outcomes\.mjs|scripts/browser-edits\.mjs|scripts/check-listener-exclusivity\.sh|^package\.json$|^\.github/workflows/build\.yml$)'; then
             echo "safari=true" >> "$GITHUB_OUTPUT"
           else
             echo "safari=false" >> "$GITHUB_OUTPUT"
@@ -457,14 +457,16 @@ jobs:
 
   # Contrast-calibration evidence (FINITE diagnostic for PR #37): known
   # fixed-color pairs against the strict audit on this runner. Fires only
-  # on this diagnostic branch's pull_request events; the ONE approved
-  # diagnostic push fires it exactly once alongside the instrumented
-  # gating legs, and the NEXT push removes it together with the
-  # calibration fixture, test class and skip flag (finiteness is
-  # procedural: no intervening pushes by us). Non-gating by design:
-  # continue-on-error means the conclusion never blocks a merge; the
-  # evidence is read from the uploaded artifact. Runs the calibration
-  # class only.
+  # on this diagnostic branch's pull_request events. ONE diagnostic RUN
+  # of this job, alongside the instrumented gating legs, is the planned
+  # observation; the NEXT push removes this job together with the
+  # calibration fixture, test class and skip flag, with no pushes
+  # between that run and the cleanup push (finiteness is procedural).
+  # The first diagnostic push ran nothing because the PR was in merge
+  # conflict; the merge push bringing main in is what triggers the run.
+  # Non-gating by design: continue-on-error means the conclusion never
+  # blocks a merge; the evidence is read from the uploaded artifact.
+  # Runs the calibration class only.
   accessibility-calibration:
     needs: changes
     if: needs.changes.outputs.ui == 'true' && github.head_ref == 'maintenance/native-safari-tests'
