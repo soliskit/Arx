@@ -477,6 +477,16 @@
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-real-labels")
     }
 
+    /// True only when a calibration test passes
+    /// --arx-minimal-calibration: the contrast-calibration fixture, one
+    /// fixed black-on-white label and one fixed low-contrast label,
+    /// nothing else. The calibration cells never join the gating audit
+    /// leg; they read the audit engine against known pairs on this
+    /// runner. No existing configuration changes.
+    private var calibrationRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-minimal-calibration")
+    }
+
     /// The single label decision for both columns: real labels when
     /// explicitly requested, or in content mode unless fixture labels
     /// are explicitly forced; fixture tokens otherwise.
@@ -640,7 +650,9 @@
     }
 
     @ViewBuilder private var detailColumn: some View {
-      if detailContentActive {
+      if calibrationRequested {
+        calibrationDetail
+      } else if detailContentActive {
         contentDetail
       } else if detailContainerRequested {
         containerDetail
@@ -699,6 +711,34 @@
       } else {
         plainDetail
       }
+    }
+
+    /// The contrast-calibration fixture: exactly two labels with fixed
+    /// sRGB colors on an explicit white backing, no other content.
+    /// "Calibration black on white" is #000000 on #FFFFFF (21.0:1 by
+    /// WCAG computation) and must never be flagged; "Calibration low
+    /// contrast" is 0.8 sRGB gray on #FFFFFF (~1.6:1) and must always
+    /// be flagged. Fixed colors, not dynamic system colors, so the
+    /// pairs carry no appearance or vibrancy dependence; the explicit
+    /// white backing removes the window-background variable.
+    private var calibrationDetail: some View {
+      VStack(alignment: .leading, spacing: 12) {
+        Text("Calibration black on white")
+          .font(.caption)
+          .foregroundStyle(Color(.sRGB, red: 0, green: 0, blue: 0, opacity: 1))
+          .padding(4)
+          .background(Color(.sRGB, red: 1, green: 1, blue: 1, opacity: 1))
+          .accessibilityIdentifier("calibration-black-on-white")
+        Text("Calibration low contrast")
+          .font(.caption)
+          .foregroundStyle(Color(.sRGB, red: 0.8, green: 0.8, blue: 0.8, opacity: 1))
+          .padding(4)
+          .background(Color(.sRGB, red: 1, green: 1, blue: 1, opacity: 1))
+          .accessibilityIdentifier("calibration-low-contrast")
+      }
+      .padding(24)
+      .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
+      .navigationTitle("Fixture Sharing")
     }
 
     /// The plain control content: two rows, three default-styled texts,

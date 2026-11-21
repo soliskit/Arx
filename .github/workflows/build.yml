@@ -370,7 +370,12 @@ jobs:
         # The runner's macOS 27.0.1 cannot execute bundles targeting the
         # project's 27.2 deployment target; lower the target for this test
         # invocation only (a command-line build setting overrides every target).
-        run: xcodebuild test -project Arx.xcodeproj -scheme Arx -destination 'platform=macOS' -only-testing:ArxUITests CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=27.0 -derivedDataPath .build-ui-tests -resultBundlePath ui-tests.xcresult
+        # The calibration class is additive evidence and never gates: it is
+        # skipped here so this leg runs exactly the tests it ran before.
+        # It runs in the branch-limited accessibility-calibration job
+        # below (this diagnostic branch's pull_request events only). The
+        # skip flag is removed with the class in the next push.
+        run: xcodebuild test -project Arx.xcodeproj -scheme Arx -destination 'platform=macOS' -only-testing:ArxUITests -skip-testing:ArxUITests/AccessibilityCalibrationTests CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=27.0 -derivedDataPath .build-ui-tests -resultBundlePath ui-tests.xcresult
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -449,3 +454,38 @@ jobs:
           }
           check "$GATE_UI" "$UI_RESULT" "ui-tests"
           check "$GATE_SAFARI" "$SAFARI_RESULT" "safari-proof"
+
+  # Contrast-calibration evidence (FINITE diagnostic for PR #37): known
+  # fixed-color pairs against the strict audit on this runner. Fires only
+  # on this diagnostic branch's pull_request events; the ONE approved
+  # diagnostic push fires it exactly once alongside the instrumented
+  # gating legs, and the NEXT push removes it together with the
+  # calibration fixture, test class and skip flag (finiteness is
+  # procedural: no intervening pushes by us). Non-gating by design:
+  # continue-on-error means the conclusion never blocks a merge; the
+  # evidence is read from the uploaded artifact. Runs the calibration
+  # class only.
+  accessibility-calibration:
+    needs: changes
+    if: needs.changes.outputs.ui == 'true' && github.head_ref == 'maintenance/native-safari-tests'
+    runs-on: xcode-27
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 27.2
+        run: |
+          if [ -d /Applications/Xcode_27.2.app ]; then
+            sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
+          fi
+          xcodebuild -version
+      - name: Resolve the pinned Xcode dependency graph
+        run: xcodebuild -resolvePackageDependencies -project Arx.xcodeproj -scheme Arx -onlyUsePackageVersionsFromResolvedFile
+      - name: Run the contrast-calibration cells
+        run: xcodebuild test -project Arx.xcodeproj -scheme Arx -destination 'platform=macOS' -only-testing:ArxUITests/AccessibilityCalibrationTests CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=27.0 -derivedDataPath .build-calibration-tests -resultBundlePath calibration-tests.xcresult
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arx-calibration-tests
+          path: |
+            calibration-tests.xcresult
+          if-no-files-found: warn

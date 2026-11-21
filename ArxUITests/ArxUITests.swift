@@ -84,7 +84,7 @@ final class ArxUITests: XCTestCase {
     print("pre-audit-app-state: \(application.state.rawValue)")
     print("pre-audit-window-enabled: \(application.windows["main"].isEnabled)")
     contrastProbeObservation(application)
-    issues.append(contentsOf: try strictAuditIssueLines(application))
+    issues.append(contentsOf: try Self.strictAuditIssueLines(application, attachmentOwner: self))
     let artifacts = URL(fileURLWithPath: "/tmp/uitest-artifacts")
     try? FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
     try? auditPNG.write(to: artifacts.appendingPathComponent("audit-window.png"))
@@ -1197,7 +1197,18 @@ final class ArxUITests: XCTestCase {
       print("pre-audit-target-exists: \(target.exists)")
       print("pre-audit-target-frame: \(target.frame)")
     }
-    let auditPNG = application.screenshot().pngRepresentation
+    // Pre-audit capture, forced now (pngRepresentation on macOS). The
+    // geometry print binds points to pixels at the closest test-side
+    // point before the audit, so the runner's backing scale is measured
+    // on every cell, never inferred. Observation only, never an
+    // assertion.
+    let auditShot = application.screenshot()
+    let auditPNG = auditShot.pngRepresentation
+    if let auditRep = auditShot.image.representations.first {
+      print(
+        "pre-audit-shot-geometry: points=\(auditShot.image.size.width)x\(auditShot.image.size.height) pixels=\(auditRep.pixelsWide)x\(auditRep.pixelsHigh)"
+      )
+    }
     let artifacts = URL(fileURLWithPath: "/tmp/uitest-artifacts")
     try? FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
     try? auditPNG.write(to: artifacts.appendingPathComponent(artifactName))
@@ -1230,9 +1241,9 @@ final class ArxUITests: XCTestCase {
       // audit is gated on observed displacement, not on a schedule
       // assumption. A deadline miss is INVALID, never negative.
       printResponderPhasesAwaited(from: phasesFileCandidates, expectedLines: expectedPhaseLines)
-      issues = try strictAuditIssueLines(application)
+      issues = try Self.strictAuditIssueLines(application, attachmentOwner: self)
     } else {
-      issues = try strictAuditIssueLines(application)
+      issues = try Self.strictAuditIssueLines(application, attachmentOwner: self)
       // Bounded handoff read (c4). Placed after the audit, whose
       // wall-clock duration exceeds the 1.0s final phase delay in
       // practice; a file still short at read time yields INVALID-partial,
@@ -1701,15 +1712,32 @@ final class ArxUITests: XCTestCase {
   /// returns one self-contained line per finding: the full issue
   /// description plus the audit-fixed installed-identifier match token and
   /// element details, or the whole AX tree when the issue carries no
-  /// element. Shared by the full-app audit and the minimal-fixture control
-  /// so both apply the identical handler. The handler returns true for
-  /// every issue so the audit collects them all instead of throwing on the
-  /// first one; the caller asserts on the collected lines.
-  private func strictAuditIssueLines(_ application: XCUIApplication) throws -> [String] {
+  /// element. Shared by the full-app audit, the minimal-fixture ladder and
+  /// the calibration cells so all apply the identical handler. The handler
+  /// returns true for every issue so the audit collects them all instead
+  /// of throwing on the first one; the caller asserts on the collected
+  /// lines. Nothing is filtered anywhere.
+  ///
+  /// Instrumentation (observation only; pass/fail semantics unchanged):
+  /// a per-issue ordinal; for element-carrying issues the hittable and
+  /// enabled attributes, a handler-time element screenshot kept on pass
+  /// and fail alike, and a one-time handler-time AX tree dump so the
+  /// finding's parent chain can be reconstructed offline (element-local
+  /// debugDescription does not include the chain); for nil-element issues
+  /// the existing per-issue tree dump plus a handler-time full screenshot.
+  /// Handler-time captures are post-sampling: they are not known to be
+  /// the render the audit engine sampled, so they bound, never exclude.
+  static func strictAuditIssueLines(
+    _ application: XCUIApplication, attachmentOwner: XCTestCase
+  ) throws -> [String] {
     let installedIdentifiers: Set<String> = ["column-sidebar", "column-detail", "window-content"]
     var lines: [String] = []
+    var ordinal = 0
+    var elementTreeDumped = false
     try application.performAccessibilityAudit { issue in
+      ordinal += 1
       var line = String(describing: issue)
+      line += " | issue-ordinal:\(ordinal)"
       // Fixed token only: whether THIS issue's element carries one of the
       // probe-installed identifiers. This is the only sanctioned binding
       // between a finding and an owned view - element identity, never
@@ -1720,11 +1748,29 @@ final class ArxUITests: XCTestCase {
 
       if let element = issue.element {
         line +=
-          " | identifier:\(element.identifier) label:\(element.label) frame:\(element.frame) type:\(element.elementType.rawValue)"
+          " | identifier:\(element.identifier) label:\(element.label) frame:\(element.frame) type:\(element.elementType.rawValue) hittable:\(element.isHittable) enabled:\(element.isEnabled)"
+        // Handler-time element pixels, retained on pass and fail alike;
+        // pngRepresentation forces the capture now.
+        let elementShot = element.screenshot()
+        _ = elementShot.pngRepresentation
+        let elementAttachment = XCTAttachment(screenshot: elementShot)
+        elementAttachment.name = "audit-issue-\(ordinal)-element"
+        elementAttachment.lifetime = .keepAlways
+        attachmentOwner.add(elementAttachment)
+        if !elementTreeDumped {
+          elementTreeDumped = true
+          line += " | handler-tree:\n" + application.debugDescription
+        }
       } else {
         // A nil element gives no location; the tree is the only way to find
         // the mismatch.
         line += " | tree:\n" + application.debugDescription
+        let fullShot = application.screenshot()
+        _ = fullShot.pngRepresentation
+        let fullAttachment = XCTAttachment(screenshot: fullShot)
+        fullAttachment.name = "audit-issue-\(ordinal)-full"
+        fullAttachment.lifetime = .keepAlways
+        attachmentOwner.add(fullAttachment)
       }
       lines.append(line)
       return true
@@ -2026,5 +2072,78 @@ final class ArxUITests: XCTestCase {
       }
     }
     return findings
+  }
+}
+
+/// Contrast-calibration cells: two known fixed-color pairs read against
+/// the SAME strict audit handler on this runner. Evidence only - the
+/// gating leg skips this class and the workflow runs it in its own
+/// non-gating job (continue-on-error), so these results never change the
+/// merge gate. Nothing is filtered: the handler returns true for every
+/// issue and the assertions below judge the collected lines exactly.
+final class AccessibilityCalibrationTests: XCTestCase {
+  private var app: XCUIApplication!
+
+  override func setUpWithError() throws {
+    continueAfterFailure = false
+    app = XCUIApplication()
+    app.launchArguments = [
+      "--bridge-fixtures", "--arx-minimal-fixture", "--arx-minimal-calibration",
+    ]
+    app.launch()
+    XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
+  }
+
+  override func tearDownWithError() throws {
+    app.terminate()
+    app = nil
+  }
+
+  /// The fixed black-on-white label (sRGB #000000 on #FFFFFF, 21.0:1 by
+  /// WCAG computation) must produce NO issues of any type. A contrast
+  /// flag here is strong evidence against the engine or the runner
+  /// environment, not against Arx - and any platform-fault conclusion
+  /// still requires pixel verification of this run's retained
+  /// handler-time and pre-audit captures, never the flag alone.
+  @MainActor
+  func testCalibrationBlackOnWhiteNeverFlagged() throws {
+    let lines = try runCalibrationAudit(artifactName: "calibration-black-on-white-window.png")
+    XCTAssertTrue(lines.isEmpty, lines.joined(separator: "\n---\n"))
+  }
+
+  /// The fixed low-contrast label (sRGB 0.8 gray on #FFFFFF, ~1.6:1)
+  /// must be flagged for contrast on every run. A missing flag fails
+  /// this test - an engine blind to real low contrast is a fault in the
+  /// other direction - and any non-contrast issue also fails it, so the
+  /// expectation can never mask an unrelated finding.
+  @MainActor
+  func testCalibrationLowContrastAlwaysFlagged() throws {
+    let lines = try runCalibrationAudit(artifactName: "calibration-low-contrast-window.png")
+    let contrastLines = lines.filter { $0.contains("Contrast failed") }
+    XCTAssertFalse(
+      contrastLines.isEmpty,
+      "known low-contrast pair was not flagged; collected lines:\n"
+        + lines.joined(separator: "\n---\n"))
+    XCTAssertEqual(
+      contrastLines.count, lines.count,
+      "non-contrast issues were collected:\n" + lines.joined(separator: "\n---\n"))
+  }
+
+  /// Shared calibration driver: the same forced pre-audit capture and
+  /// geometry print as the ladder, then the shared strict handler.
+  @MainActor
+  private func runCalibrationAudit(artifactName: String) throws -> [String] {
+    let shot = app.screenshot()
+    let png = shot.pngRepresentation
+    if let rep = shot.image.representations.first {
+      print(
+        "pre-audit-shot-geometry: points=\(shot.image.size.width)x\(shot.image.size.height) pixels=\(rep.pixelsWide)x\(rep.pixelsHigh)"
+      )
+    }
+    let artifacts = URL(fileURLWithPath: "/tmp/uitest-artifacts")
+    try? FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
+    try? png.write(to: artifacts.appendingPathComponent(artifactName))
+    let lines = try ArxUITests.strictAuditIssueLines(app, attachmentOwner: self)
+    return lines
   }
 }
