@@ -1,0 +1,29 @@
+name: Local Sections proof synthetic checks
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  foundation-fixtures:
+    runs-on: xcode-27
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run synthetic exact-object checks without EventKit or native provider
+        run: |
+          set -euo pipefail
+          ROOT=SectionsWorker
+          xcrun clang -fobjc-arc -Wall -Wextra -Werror -DARX_SECTION_READER_FIXTURES=1 -I "$ROOT" -framework Foundation "$ROOT/ExactReader.m" experiments/sections-local/ExactFixtures.m -o "$RUNNER_TEMP/local-identity-fixtures"
+          "$RUNNER_TEMP/local-identity-fixtures"
+          xcrun clang -std=c11 -Wall -Wextra -Werror -I "$ROOT" experiments/sections-local/gates-test.c -o "$RUNNER_TEMP/local-section-gates"
+          "$RUNNER_TEMP/local-section-gates"
+      - name: Run bounded fixture transport with all native paths compiled out
+        run: |
+          set -euo pipefail
+          ROOT=SectionsWorker
+          xcrun clang -fobjc-arc -Wall -Wextra -Werror -DARX_SECTION_READER_FIXTURES=1 -I "$ROOT" -framework Foundation "$ROOT/Worker.m" experiments/sections-local/WorkerFixtureMain.m -o "$RUNNER_TEMP/local-worker-fixture"
+          python3 experiments/sections-local/transport-fixtures.py "$RUNNER_TEMP/local-worker-fixture"
