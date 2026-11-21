@@ -2136,8 +2136,8 @@ final class ArxAuditMappingDiagnosticTests: XCTestCase {
 
   /// Guard: wait boundedly for the target first, then require exactly
   /// one static text with the given identifier, carrying the expected
-  /// label, hittable, with a non-empty frame, before the audit runs.
-  /// Any deviation throws, halting the test before the audit.
+  /// content value, hittable, with a non-empty frame, before the audit
+  /// runs. Any deviation throws, halting the test before the audit.
   @MainActor
   private func requireUniqueTarget(
     _ identifier: String, label expectedLabel: String, in application: XCUIApplication
@@ -2152,9 +2152,17 @@ final class ArxAuditMappingDiagnosticTests: XCTestCase {
       XCTFail("diagnostic target \(identifier) must be unique; found \(query.count)")
       throw GuardFailure(message: "target count \(query.count) for \(identifier)")
     }
-    guard target.label == expectedLabel else {
-      XCTFail("diagnostic target \(identifier) has unexpected label")
-      throw GuardFailure(message: "label mismatch for \(identifier)")
+    // Prior run snapshots identified this target by identifier and a
+    // value prefix; its full attributes were not logged. Record both
+    // attributes before enforcing, then test exact value equality.
+    let observedLabel = target.label
+    let observedValue = target.value as? String
+    print(
+      "diagnostic-target: identifier=\(identifier) label=\(observedLabel) "
+        + "value=\(observedValue ?? "nil") frame=\(target.frame)")
+    guard observedValue == expectedLabel else {
+      XCTFail("diagnostic target \(identifier) has unexpected value: \(observedValue ?? "nil")")
+      throw GuardFailure(message: "value mismatch for \(identifier)")
     }
     guard target.isHittable else {
       XCTFail("diagnostic target \(identifier) is not hittable")
@@ -2164,7 +2172,6 @@ final class ArxAuditMappingDiagnosticTests: XCTestCase {
       XCTFail("diagnostic target \(identifier) has an empty frame")
       throw GuardFailure(message: "empty frame for \(identifier)")
     }
-    print("diagnostic-target: identifier=\(identifier) label=\(target.label) frame=\(target.frame)")
     return target
   }
 
