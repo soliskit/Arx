@@ -2074,3 +2074,159 @@ final class ArxUITests: XCTestCase {
     return findings
   }
 }
+
+/// Opt-in audit-mapping diagnostic. The suite's shared audit helper
+/// returns true for every issue, so no audit finding is ever recorded
+/// as a native XCTest failure and callers assert on collected issue
+/// strings instead. No existing capture therefore shows what XCTest
+/// records when an audit issue DOES become a native failure. These
+/// tests observe that mapping once, on two literal control cells
+/// whose expected outcomes are known in advance, before any recurring
+/// calibration job is proposed.
+///
+/// Design:
+/// - Handlers follow the performAccessibilityAudit contract (WWDC23
+///   session 10035: return true to ignore an issue, false to report
+///   it as a failure) and return false for every issue: nothing is
+///   ignored, nothing is suppressed, and there is NO expected failure
+///   and NO issue matcher, so no finding of any kind is absorbed.
+/// - continueAfterFailure stays at its default (true): a recorded
+///   failure does not stop the audit, so every finding in the window
+///   is recorded natively in one pass. Guards below halt only by
+///   THROWING, which aborts the test regardless of that flag.
+/// - Two separate evidence channels, not to be conflated: (1) the
+///   handler records the XCUIAccessibilityAuditIssue surface it
+///   receives - auditType, compactDescription, detailedDescription,
+///   bound element identifier - plus element screenshots; (2) the
+///   NATIVE XCTIssue that returning false produces (its type,
+///   descriptions and source context) is read from the result bundle
+///   after the run. The handler cannot see channel 2.
+/// - The job that runs this class is opt-in via the Build workflow's
+///   diagnostic-only dispatch input and is expected to fail red: the
+///   low-contrast control cell should produce at least one finding.
+///   If it records none, the test goes green and that means no mapping
+///   evidence was collected - not a verified control pass, and not
+///   evidence for or against an audit-engine fault.
+final class ArxAuditMappingDiagnosticTests: XCTestCase {
+
+  /// Guard failures halt the test immediately; thrown instead of
+  /// asserted-then-continued.
+  private struct GuardFailure: Error {
+    let message: String
+  }
+
+  /// Launch the fixture with one calibration cell and return the
+  /// running app. Any setup deviation throws. The pre-audit window
+  /// render is kept as an artifact for pixel comparison.
+  @MainActor
+  private func launchDiagnostic(argument: String, artifactName: String) throws -> XCUIApplication {
+    let application = XCUIApplication()
+    application.launchArguments = ["--bridge-fixtures", "--arx-minimal-fixture", argument]
+    application.launch()
+    guard application.windows.firstMatch.waitForExistence(timeout: 10) else {
+      XCTFail("diagnostic fixture window did not appear within 10s for \(argument)")
+      throw GuardFailure(message: "window absent for \(argument)")
+    }
+    let artifacts = URL(fileURLWithPath: "/tmp/uitest-artifacts")
+    try FileManager.default.createDirectory(at: artifacts, withIntermediateDirectories: true)
+    try application.screenshot().pngRepresentation.write(
+      to: artifacts.appendingPathComponent(artifactName))
+    return application
+  }
+
+  /// Guard: wait boundedly for the target first, then require exactly
+  /// one static text with the given identifier, carrying the expected
+  /// label, hittable, with a non-empty frame, before the audit runs.
+  /// Any deviation throws, halting the test before the audit.
+  @MainActor
+  private func requireUniqueTarget(
+    _ identifier: String, label expectedLabel: String, in application: XCUIApplication
+  ) throws -> XCUIElement {
+    let query = application.staticTexts.matching(identifier: identifier)
+    let target = query.firstMatch
+    guard target.waitForExistence(timeout: 5) else {
+      XCTFail("diagnostic target \(identifier) missing: not the intended control window")
+      throw GuardFailure(message: "target absent for \(identifier)")
+    }
+    guard query.count == 1 else {
+      XCTFail("diagnostic target \(identifier) must be unique; found \(query.count)")
+      throw GuardFailure(message: "target count \(query.count) for \(identifier)")
+    }
+    guard target.label == expectedLabel else {
+      XCTFail("diagnostic target \(identifier) has unexpected label")
+      throw GuardFailure(message: "label mismatch for \(identifier)")
+    }
+    guard target.isHittable else {
+      XCTFail("diagnostic target \(identifier) is not hittable")
+      throw GuardFailure(message: "target not hittable for \(identifier)")
+    }
+    guard !target.frame.isEmpty else {
+      XCTFail("diagnostic target \(identifier) has an empty frame")
+      throw GuardFailure(message: "empty frame for \(identifier)")
+    }
+    print("diagnostic-target: identifier=\(identifier) label=\(target.label) frame=\(target.frame)")
+    return target
+  }
+
+  /// Run one contrast audit with an all-false handler and record the
+  /// XCUIAccessibilityAuditIssue surface for every issue: position,
+  /// audit type, both descriptions and the bound element's identifier,
+  /// with the element screenshot attached. No issue is ignored and no
+  /// failure is absorbed: every finding becomes a native failure, and
+  /// the XCTIssue payloads XCTest records for those native failures
+  /// are the second evidence channel, reviewed from the result bundle
+  /// and log after the run.
+  @MainActor
+  private func runMappingAudit(on application: XCUIApplication) throws {
+    var ordinal = 0
+    try application.performAccessibilityAudit(for: [.contrast]) { issue in
+      ordinal += 1
+      let elementIdentifier = issue.element?.identifier ?? "<no element>"
+      print(
+        "diagnostic-issue: ordinal=\(ordinal) auditType=\(issue.auditType)"
+          + " element=\(elementIdentifier)"
+          + " compact=\(issue.compactDescription)"
+          + " detailed=\(issue.detailedDescription)")
+      if let element = issue.element {
+        let shot = element.screenshot()
+        _ = shot.pngRepresentation
+        let attachment = XCTAttachment(screenshot: shot)
+        attachment.name = "diagnostic-issue-\(ordinal)-element-\(elementIdentifier)"
+        attachment.lifetime = .keepAlways
+        self.add(attachment)
+      }
+      return false
+    }
+  }
+
+  /// Diagnostic A: the black-on-white control cell. Expected to
+  /// produce zero findings; any finding is recorded in full.
+  @MainActor
+  func testDiagnosticBlackOnWhiteMapping() throws {
+    let application = try launchDiagnostic(
+      argument: "--arx-calibration-black-on-white",
+      artifactName: "diagnostic-black-on-white-audit-window.png")
+    _ = try requireUniqueTarget(
+      "calibration-black-on-white",
+      label: "Calibration black-on-white control text",
+      in: application)
+    try runMappingAudit(on: application)
+  }
+
+  /// Diagnostic B: the low-contrast control cell. Expected to produce
+  /// at least one finding; every finding is recorded in full and
+  /// reported natively, so this test is expected to fail and its
+  /// failure records are the mapping evidence. A green result means
+  /// no finding was recorded: no mapping evidence, not a pass.
+  @MainActor
+  func testDiagnosticLowContrastMapping() throws {
+    let application = try launchDiagnostic(
+      argument: "--arx-calibration-low-contrast",
+      artifactName: "diagnostic-low-contrast-audit-window.png")
+    _ = try requireUniqueTarget(
+      "calibration-low-contrast",
+      label: "Calibration low-contrast control text",
+      in: application)
+    try runMappingAudit(on: application)
+  }
+}

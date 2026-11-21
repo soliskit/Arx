@@ -5,6 +5,15 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      # Opt-in isolated run of the audit-mapping diagnostic leg only:
+      # when a manual dispatch sets this true, every ordinary leg is
+      # skipped and only the audit-mapping-diagnostic job runs. Unset
+      # or false on any trigger runs the workflow exactly as before.
+      diagnostic-only:
+        description: "Run only the audit-mapping diagnostic leg"
+        type: boolean
+        default: false
   # Weekly run of the legs in this workflow: Saturday 7:20 AM Pacific year-round,
   # daylight-saving safe via the schedule timezone key (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onschedule).
   # Minute 20 avoids the documented start-of-hour load peak for scheduled runs
@@ -18,7 +27,7 @@ permissions:
 
 jobs:
   lockfile-capture:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && !(github.event_name == 'workflow_dispatch' && inputs.diagnostic-only == true)
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
@@ -116,6 +125,7 @@ jobs:
   # The slow native and Safari legs run only when the code they cover changes;
   # pushes, dispatches and the weekly full-suite run always run them.
   changes:
+    if: "!(github.event_name == 'workflow_dispatch' && inputs.diagnostic-only == true)"
     runs-on: ubuntu-22.04
     outputs:
       ui: ${{ steps.filter.outputs.ui }}
@@ -145,6 +155,7 @@ jobs:
             echo "safari=false" >> "$GITHUB_OUTPUT"
           fi
   build:
+    if: "!(github.event_name == 'workflow_dispatch' && inputs.diagnostic-only == true)"
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
@@ -281,6 +292,7 @@ jobs:
           path: settings-*.json
 
   mac-screenshot:
+    if: "!(github.event_name == 'workflow_dispatch' && inputs.diagnostic-only == true)"
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
@@ -322,6 +334,7 @@ jobs:
             navigation-elements.txt
 
   browser-proof:
+    if: "!(github.event_name == 'workflow_dispatch' && inputs.diagnostic-only == true)"
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -356,7 +369,7 @@ jobs:
 
   ui-tests:
     needs: changes
-    if: needs.changes.outputs.ui == 'true'
+    if: needs.changes.outputs.ui == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.diagnostic-only == true)
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
@@ -372,7 +385,7 @@ jobs:
         # The runner's macOS 27.0.1 cannot execute bundles targeting the
         # project's 27.2 deployment target; lower the target for this test
         # invocation only (a command-line build setting overrides every target).
-        run: xcodebuild test -project Arx.xcodeproj -scheme Arx -destination 'platform=macOS' -only-testing:ArxUITests CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=27.0 -derivedDataPath .build-ui-tests -resultBundlePath ui-tests.xcresult
+        run: xcodebuild test -project Arx.xcodeproj -scheme Arx -destination 'platform=macOS' -only-testing:ArxUITests -skip-testing:ArxUITests/ArxAuditMappingDiagnosticTests CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=27.0 -derivedDataPath .build-ui-tests -resultBundlePath ui-tests.xcresult
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -381,9 +394,58 @@ jobs:
             ui-tests.xcresult
             /tmp/uitest-artifacts/
 
+  # Opt-in audit-mapping diagnostic. Runs only on a manual Build
+  # dispatch that sets the diagnostic-only input to true; that dispatch
+  # intentionally skips every ordinary leg of the existing UI workflow,
+  # so one diagnostic dispatch adds exactly one xcode-27 job and
+  # nothing else. It is deliberately expected to fail red: the handlers
+  # report every audit issue natively and ignore none, and the
+  # low-contrast control cell should produce at least one finding. A
+  # green run means no finding was recorded, which is an absence of
+  # mapping evidence, not a verified control pass and not evidence
+  # about the audit engine. The recorded issue payloads are reviewed
+  # from the result bundle before any recurring calibration job is
+  # proposed. Not in the ruleset's required checks and not in
+  # slow-legs' needs. The ui-tests leg of the existing UI workflow
+  # skips this class via one -skip-testing flag. Same runner label as the other native legs:
+  # same configuration, not a guaranteed same physical runner or image
+  # build, so the Record step captures the actual environment.
+  audit-mapping-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.diagnostic-only == true
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 27.2
+        run: |
+          if [ -d /Applications/Xcode_27.2.app ]; then
+            sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
+          fi
+          xcodebuild -version
+      - name: Record the environment
+        run: |
+          sw_vers
+          echo "runner image: ${ImageOS:-unknown} ${ImageVersion:-unknown}"
+          system_profiler SPDisplaysDataType | grep -iE 'resolution|display type' || true
+          defaults read -g AppleInterfaceStyle 2>/dev/null || echo "appearance: light (no dark-mode override)"
+      - name: Resolve the pinned Xcode dependency graph
+        run: xcodebuild -resolvePackageDependencies -project Arx.xcodeproj -scheme Arx -onlyUsePackageVersionsFromResolvedFile
+      - name: Run the audit-mapping diagnostic tests
+        # Same deployment-target override as the existing UI workflow's
+        # ui-tests job:
+        # the runner's macOS 27.0.1 cannot execute bundles targeting 27.2.
+        run: xcodebuild test -project Arx.xcodeproj -scheme Arx -destination 'platform=macOS' -only-testing:ArxUITests/ArxAuditMappingDiagnosticTests CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=27.0 -derivedDataPath .build-audit-diagnostic -resultBundlePath audit-diagnostic.xcresult
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arx-audit-mapping-diagnostic
+          path: |
+            audit-diagnostic.xcresult
+            /tmp/uitest-artifacts/
+
   safari-proof:
     needs: changes
-    if: needs.changes.outputs.safari == 'true'
+    if: needs.changes.outputs.safari == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.diagnostic-only == true)
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
@@ -417,7 +479,7 @@ jobs:
   # ran and failed or was cancelled, or a coverage gate that could not decide,
   # fails this check. Add slow-legs to the ruleset's required status checks.
   slow-legs:
-    if: always()
+    if: always() && !(github.event_name == 'workflow_dispatch' && inputs.diagnostic-only == true)
     needs: [changes, ui-tests, safari-proof]
     runs-on: ubuntu-22.04
     steps:

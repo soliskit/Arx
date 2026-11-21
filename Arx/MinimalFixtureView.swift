@@ -361,6 +361,23 @@
       ProcessInfo.processInfo.arguments.contains("--arx-minimal-bridge-status-groupbox")
     }
 
+    /// True only when a diagnostic test passes
+    /// --arx-calibration-black-on-white: one literal black caption on
+    /// an explicit white background, mounted alone. The calibration
+    /// control expected to PASS the contrast audit.
+    private var calibrationBlackOnWhiteRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-calibration-black-on-white")
+    }
+
+    /// True only when a diagnostic test passes
+    /// --arx-calibration-low-contrast: one literal gray caption
+    /// (white 0.7, about 2.1:1 by sRGB math, clearly below the 4.5:1
+    /// bar) on the same explicit white background. The calibration
+    /// control the contrast audit is expected to FLAG.
+    private var calibrationLowContrastRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-calibration-low-contrast")
+    }
+
     /// True only when a control test passes --arx-minimal-height-overflow:
     /// the texts cell content (title, status, revoke caption) plus a
     /// trailing clear filler taller than any window the screen can
@@ -696,6 +713,10 @@
         bridgeStatusPlainDetail
       } else if bridgeStatusGroupBoxRequested {
         bridgeStatusGroupBoxDetail
+      } else if calibrationBlackOnWhiteRequested {
+        calibrationBlackOnWhiteDetail
+      } else if calibrationLowContrastRequested {
+        calibrationLowContrastDetail
       } else {
         plainDetail
       }
@@ -852,6 +873,43 @@
             .foregroundStyle(.primary)
             .accessibilityIdentifier("bridge-status-pair-target")
         }
+      }
+      .padding(24)
+      .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
+      .navigationTitle("Fixture Sharing")
+    }
+
+    /// Calibration control cell: one literal black caption on an
+    /// explicit white background, mounted alone. The control expected
+    /// to PASS the contrast audit. Literal colors, not semantic styles,
+    /// keep the cell independent of the appearance or palette under
+    /// test.
+    @ViewBuilder private var calibrationBlackOnWhiteDetail: some View {
+      VStack(alignment: .leading, spacing: 0) {
+        Text("Calibration black-on-white control text")
+          .font(.caption)
+          .foregroundStyle(Color.black)
+          .padding(8)
+          .background(Color.white)
+          .accessibilityIdentifier("calibration-black-on-white")
+      }
+      .padding(24)
+      .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
+      .navigationTitle("Fixture Sharing")
+    }
+
+    /// Calibration control cell: one literal gray caption (white 0.7,
+    /// about 2.1:1 by sRGB math, clearly below the 4.5:1 bar) on the
+    /// same explicit white background, mounted alone. The control the
+    /// contrast audit is expected to FLAG.
+    @ViewBuilder private var calibrationLowContrastDetail: some View {
+      VStack(alignment: .leading, spacing: 0) {
+        Text("Calibration low-contrast control text")
+          .font(.caption)
+          .foregroundStyle(Color(white: 0.7))
+          .padding(8)
+          .background(Color.white)
+          .accessibilityIdentifier("calibration-low-contrast")
       }
       .padding(24)
       .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
