@@ -5,8 +5,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-  # Weekly run of the legs in this workflow: Saturday 7 AM Pacific year-round,
-  # daylight-saving safe via the schedule timezone key (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onschedule).
+  # Weekly full-suite run: Saturday 7 AM Pacific year-round, daylight-saving
+  # safe via the schedule timezone key (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onschedule).
   schedule:
     - cron: "0 7 * * 6"
       timezone: "America/Los_Angeles"
@@ -111,11 +111,12 @@ jobs:
           path: |
             ${{ runner.temp }}/capture/generated-workspace.resolved
             ${{ runner.temp }}/capture/facts.txt
-  # The Safari leg runs only when the code it covers changes; pushes,
-  # dispatches and the weekly run always run it.
+  # The slow native and Safari legs run only when the code they cover changes;
+  # pushes, dispatches and the weekly full-suite run always run them.
   changes:
     runs-on: ubuntu-22.04
     outputs:
+      ui: ${{ steps.filter.outputs.ui }}
       safari: ${{ steps.filter.outputs.safari }}
     steps:
       - uses: actions/checkout@v4
@@ -125,11 +126,17 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "ui=true" >> "$GITHUB_OUTPUT"
             echo "safari=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)"
           printf 'Covered-path input:\n%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -Eq '^(Arx/|ArxUITests/|Arx\.xcodeproj/|BridgeCore/|Package\.swift|Package\.resolved|^\.github/workflows/build\.yml$)'; then
+            echo "ui=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ui=false" >> "$GITHUB_OUTPUT"
+          fi
           if printf '%s\n' "$changed" | grep -Eq '^(BridgeCore/|BridgeFixtureServer/|Package\.swift|Package\.resolved|scripts/browser-proof-safari\.mjs|scripts/browser-outcomes\.mjs|scripts/browser-edits\.mjs|scripts/check-listener-exclusivity\.sh|^package\.json$|^\.github/workflows/build\.yml$)'; then
             echo "safari=true" >> "$GITHUB_OUTPUT"
           else
@@ -345,6 +352,33 @@ jobs:
           name: arx-browser-fixtures
           path: browser-evidence/
 
+  ui-tests:
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 27.2
+        run: |
+          if [ -d /Applications/Xcode_27.2.app ]; then
+            sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
+          fi
+          xcodebuild -version
+      - name: Resolve the pinned Xcode dependency graph
+        run: xcodebuild -resolvePackageDependencies -project Arx.xcodeproj -scheme Arx -onlyUsePackageVersionsFromResolvedFile
+      - name: Run the fixture UI tests
+        # The runner's macOS 27.0.1 cannot execute bundles targeting the
+        # project's 27.2 deployment target; lower the target for this test
+        # invocation only (a command-line build setting overrides every target).
+        run: xcodebuild test -project Arx.xcodeproj -scheme Arx -destination 'platform=macOS' -only-testing:ArxUITests CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=27.0 -derivedDataPath .build-ui-tests -resultBundlePath ui-tests.xcresult
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arx-ui-tests
+          path: |
+            ui-tests.xcresult
+            /tmp/uitest-artifacts/
+
   safari-proof:
     needs: changes
     if: needs.changes.outputs.safari == 'true'
@@ -376,18 +410,20 @@ jobs:
           name: arx-safari-fixtures
           path: safari-evidence/
 
-  # Merge gate for the gated leg: passes when the leg either ran green or was
+  # Merge gate for the gated legs: passes when each leg either ran green or was
   # legitimately skipped because its covered code did not change. A leg that
   # ran and failed or was cancelled, or a coverage gate that could not decide,
-  # fails this check.
+  # fails this check. Add slow-legs to the ruleset's required status checks.
   slow-legs:
     if: always()
-    needs: [changes, safari-proof]
+    needs: [changes, ui-tests, safari-proof]
     runs-on: ubuntu-22.04
     steps:
       - name: Aggregate the gated legs
         env:
+          GATE_UI: ${{ needs.changes.outputs.ui }}
           GATE_SAFARI: ${{ needs.changes.outputs.safari }}
+          UI_RESULT: ${{ needs.ui-tests.result }}
           SAFARI_RESULT: ${{ needs.safari-proof.result }}
         run: |
           set -euo pipefail
@@ -411,4 +447,5 @@ jobs:
               echo "$name skipped: covered code unchanged."
             fi
           }
+          check "$GATE_UI" "$UI_RESULT" "ui-tests"
           check "$GATE_SAFARI" "$SAFARI_RESULT" "safari-proof"

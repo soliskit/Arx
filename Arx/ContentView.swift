@@ -17,6 +17,7 @@ struct ContentView: View {
       VStack(alignment: .leading, spacing: 12) {
         if model.fixture {
           Text("Fixture data - no real Reminders access").font(.caption).foregroundStyle(.primary)
+            .padding(.horizontal, 6).padding(.vertical, 2).background(.background, in: .capsule)
         }
         if model.connected {
           List(model.lists, selection: $highlighted) { list in
@@ -53,11 +54,13 @@ struct ContentView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Lists to share")
         .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
+        .background(ColumnAccessibilityProbe(column: .sidebar))
     } detail: {
       ScrollView {
         VStack(alignment: .leading, spacing: 20) {
           Text("Arx bridge").font(.largeTitle)
-          Text(model.message).accessibilityIdentifier("bridge-status")
+          Text(model.message).foregroundStyle(.primary).accessibilityIdentifier(
+            "bridge-status")
           GroupBox("Connection") {
             VStack(alignment: .leading, spacing: 10) {
               TextField("Exact remote HTTPS origin", text: $model.origin).textContentType(.URL)
@@ -129,6 +132,9 @@ struct ContentView: View {
           ).font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(maxWidth: 760, alignment: .leading)
       }.navigationTitle("Sharing")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Sharing")
+        .background(ColumnAccessibilityProbe(column: .detail))
     }
     .onChange(of: model.rights.read) { _, enabled in
       if !enabled {
