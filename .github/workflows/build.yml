@@ -5,10 +5,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-  # Weekly full-suite run: Saturday 7 AM Pacific year-round, daylight-saving
-  # safe via the schedule timezone key (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onschedule).
+  # Weekly run of the legs in this workflow: Saturday 7:20 AM Pacific year-round,
+  # daylight-saving safe via the schedule timezone key (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onschedule).
+  # Minute 20 avoids the documented start-of-hour load peak for scheduled runs
+  # (https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
   schedule:
-    - cron: "0 7 * * 6"
+    - cron: "20 7 * * 6"
       timezone: "America/Los_Angeles"
 
 permissions:
