@@ -1446,7 +1446,7 @@
     @ViewBuilder private var revokeCaption: some View {
       Text("Revoke stops new requests. Data already viewed and changes already saved remain.")
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.primary)
     }
 
     /// The Connection group box, verbatim from ContentView's fixture
@@ -1550,7 +1550,7 @@
             "Select this new client's access. To change an existing client, revoke and pair again."
           )
           .font(.caption)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(.primary)
           Button("Create single-use pairing secret") {}
             .disabled(true)
         }
@@ -1564,7 +1564,7 @@
         VStack(alignment: .leading, spacing: 8) {
           Button("Refresh client status") {}
           Text("No client has access.")
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.primary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(6)

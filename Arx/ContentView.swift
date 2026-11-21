@@ -96,7 +96,7 @@ struct ContentView: View {
                 .disabled(!model.rights.read)
               Text(
                 "Select this new client's access. To change an existing client, revoke and pair again."
-              ).font(.caption).foregroundStyle(.secondary)
+              ).font(.caption).foregroundStyle(.primary)
               Button("Create single-use pairing secret") { model.pair() }.disabled(
                 !model.running && !model.starting)
               if !model.pairingSecret.isEmpty {
@@ -112,7 +112,7 @@ struct ContentView: View {
           GroupBox("Clients") {
             VStack(alignment: .leading, spacing: 8) {
               Button("Refresh client status") { model.clients = model.sharing.clientInfo }
-              if model.clients.isEmpty { Text("No client has access.").foregroundStyle(.secondary) }
+              if model.clients.isEmpty { Text("No client has access.").foregroundStyle(.primary) }
               ForEach(model.clients) { client in
                 HStack {
                   VStack(alignment: .leading) {
@@ -129,7 +129,7 @@ struct ContentView: View {
           }
           Text(
             "Revoke stops new requests. Data already viewed and changes already saved remain."
-          ).font(.caption).foregroundStyle(.secondary)
+          ).font(.caption).foregroundStyle(.primary)
         }.padding(24).frame(maxWidth: 760, alignment: .leading)
       }.navigationTitle("Sharing")
         .accessibilityElement(children: .contain)
