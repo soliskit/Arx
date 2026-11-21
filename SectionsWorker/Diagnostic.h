@@ -26,7 +26,8 @@ static inline NSDictionary *ARXSectionDiagnostic(NSDictionary *result) {
             if ([reason isEqual:@"unavailable"]) reason = @"membership_api_unavailable";
             if ([@[@"denied", @"identity_unverified", @"identity_list_unverified",
                    @"identity_source_unverified", @"identity_title_unverified",
-                   @"membership_api_unavailable", @"membership_unverified",
+                   @"membership_api_unavailable", @"membership_unverified", @"membership_nil_no_error",
+                   @"membership_error", @"membership_section_identity", @"membership_unnamed",
                    @"private_api_exception"] containsObject:reason]) {
                 NSMutableDictionary *clean =
                     [@{ @"state": @"unknown", @"reason": reason, @"sectionMatched": @NO } mutableCopy];

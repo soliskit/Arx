@@ -123,19 +123,36 @@ int main(void) {
         saved = item.fixtureStore; item.fixtureStore = nil; UNKNOWN("no store fallback"); item.fixtureStore = saved;
         store.fixtureView = [NSObject new]; UNKNOWN("missing membership selector");
         store.fixtureView = [WrongABI new]; UNKNOWN("wrong membership ABI"); store.fixtureView = view;
-        section.list = otherList; expect([READ()[@"state"] isEqual:@"unknown"], "section outside exact list"); section.list = list; section.displayName = @"Scratch section";
-        section.list = sameListWrongAccount; expect([READ()[@"state"] isEqual:@"unknown"], "section wrong account"); section.list = list; section.displayName = @"Scratch section";
+        section.list = otherList;
+        NSDictionary *outsideList = READ();
+        expect([outsideList[@"state"] isEqual:@"unknown"] && [outsideList[@"reason"] isEqual:@"membership_section_identity"],
+            "section outside exact list; site named");
+        section.list = list; section.displayName = @"Scratch section";
+        section.list = sameListWrongAccount;
+        NSDictionary *wrongAccount = READ();
+        expect([wrongAccount[@"state"] isEqual:@"unknown"] && [wrongAccount[@"reason"] isEqual:@"membership_section_identity"],
+            "section wrong account; site named");
+        section.list = list; section.displayName = @"Scratch section";
         section.displayName = @"wrong section";
         expect([READ()[@"sectionMatched"] isEqual:@NO], "section mismatch is not success");
+        section.displayName = nil;
+        NSDictionary *unnamed = READ();
+        expect([unnamed[@"state"] isEqual:@"unknown"] && [unnamed[@"reason"] isEqual:@"membership_unnamed"],
+            "unnamed section never positive; site named");
         section.displayName = @"Scratch section";
-        view.section = nil; expect([READ()[@"state"] isEqual:@"unknown"], "nil never none"); view.section = section;
+        view.section = nil;
+        NSDictionary *nilResult = READ();
+        expect([nilResult[@"state"] isEqual:@"unknown"] && [nilResult[@"reason"] isEqual:@"membership_nil_no_error"],
+            "nil never none; site named");
+        view.section = section;
         view.returnsError = YES; NSDictionary *errored = READ();
-        expect([errored[@"state"] isEqual:@"unknown"] && [errored[@"errorDomain"] isEqual:@"other"] && [errored[@"errorCode"] isEqual:@1], "error never positive; structured detail only"); view.returnsError = NO;
+        expect([errored[@"state"] isEqual:@"unknown"] && [errored[@"reason"] isEqual:@"membership_error"] && [errored[@"errorDomain"] isEqual:@"other"] && [errored[@"errorCode"] isEqual:@1], "error never positive; site named, structured detail only"); view.returnsError = NO;
         view.throws = YES; NSDictionary *failure = READ();
         expect([failure[@"reason"] isEqual:@"private_api_exception"] && failure.count == 3 && [failure[@"exceptionName"] isEqual:@"other"], "exception sanitized");
         expect(![[failure description] containsString:@"PRIVATE-SENSITIVE"], "no exception disclosure"); view.throws = NO;
         expect([READ()[@"state"] isEqual:@"section"], "fresh read recovers after exception");
-        for (NSString *reason in @[@"denied", @"identity_unverified", @"membership_unverified", @"private_api_exception"]) {
+        for (NSString *reason in @[@"denied", @"identity_unverified", @"membership_unverified", @"membership_nil_no_error",
+                                   @"membership_error", @"membership_section_identity", @"membership_unnamed", @"private_api_exception"]) {
             NSDictionary *r = ARXSectionDiagnostic(@{@"state": @"unknown", @"reason": reason, @"private": @"PRIVATE-SENSITIVE"});
             expect([r[@"reason"] isEqual:reason] && r.count == 3, "fixed refusal preserved");
             expect(![[r description] containsString:@"PRIVATE-SENSITIVE"], "diagnostic excludes private fields");
@@ -147,10 +164,10 @@ int main(void) {
         for (NSString *sub in @[@"identity_list_unverified", @"identity_source_unverified", @"identity_title_unverified"]) {
             expect([ARXSectionDiagnostic(@{@"state": @"unknown", @"reason": sub})[@"reason"] isEqual:sub], "identity sub-reason preserved");
         }
-        NSDictionary *withDomain = ARXSectionDiagnostic(@{@"state": @"unknown", @"reason": @"membership_unverified",
+        NSDictionary *withDomain = ARXSectionDiagnostic(@{@"state": @"unknown", @"reason": @"membership_error",
             @"errorDomain": @"EKErrorDomain", @"errorCode": @42});
         expect([withDomain[@"errorDomain"] isEqual:@"EKErrorDomain"] && [withDomain[@"errorCode"] isEqual:@42], "allowlisted domain and code preserved");
-        expect(ARXSectionDiagnostic(@{@"state": @"unknown", @"reason": @"membership_unverified",
+        expect(ARXSectionDiagnostic(@{@"state": @"unknown", @"reason": @"membership_error",
             @"errorDomain": @"PRIVATE-SENSITIVE", @"errorCode": @1})[@"errorDomain"] == nil, "unrecognized domain dropped");
         expect(ARXSectionDiagnostic(@{@"state": @"unknown", @"reason": @"private_api_exception",
             @"exceptionName": @"PRIVATE-SENSITIVE"})[@"exceptionName"] == nil, "unrecognized exception dropped");

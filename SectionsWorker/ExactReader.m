@@ -167,8 +167,8 @@ static id storeFor(id reminder) {
             view, NSSelectorFromString(selector), get(item, @"remObjectID"), &error);
         marker(@"membership.call", YES);
         if (error || !section) {
-            if (!error) return unknown(@"membership_unverified");
-            return @{ @"state": @"unknown", @"reason": @"membership_unverified",
+            if (!error) return unknown(@"membership_nil_no_error");
+            return @{ @"state": @"unknown", @"reason": @"membership_error",
                 @"errorDomain": domainToken(error.domain), @"errorCode": @(error.code) };
         }
         if (backing(calendar, @"REMList") != list || backing(reminder, @"REMReminder") != item ||
@@ -181,11 +181,11 @@ static id storeFor(id reminder) {
         id sectionParent = get(section, @"list");
         if (!sectionID || !exactText(identifier(sectionParent, @"REMCDList"), listID) ||
             !exactText(identifier(get(sectionParent, @"account"), @"REMCDAccount"), accountID))
-            return unknown(@"membership_unverified");
+            return unknown(@"membership_section_identity");
         NSString *expected = text(request[@"expectedSection"]);
         if (!expected) return unknown(@"identity_unverified");
         NSString *actualName = text(get(section, @"displayName"));
-        if (!actualName) return unknown(@"membership_unverified");
+        if (!actualName) return unknown(@"membership_unnamed");
         // Owner-approved disposable-scope capture: the expected and returned
         // names ride with the match boolean. The returned name is verified to
         // the selected list/account above but may be a pre-existing section.

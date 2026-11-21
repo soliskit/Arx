@@ -110,7 +110,9 @@ import Testing
       "existing_permission_unavailable", "label_bound_exceeded", "labels_unverified",
       "selection_unavailable", "selection_timeout", "selection_not_exactly_one",
       "identity_unverified", "private_framework_unavailable", "membership_api_unavailable",
-      "membership_unverified", "section_name_mismatch", "private_api_exception", "denied",
+      "membership_unverified", "membership_nil_no_error", "membership_error",
+      "membership_section_identity", "membership_unnamed", "section_name_mismatch",
+      "private_api_exception", "denied",
       "timeout", "worker_unavailable", "PRIVATE reminder name and ID",
     ]
     for action in ["labels", "locate", "read"] {
@@ -154,6 +156,17 @@ import Testing
     }
     #expect(SectionsExperimentModel.diagnosticReason("timeout").contains("read unknown"))
     #expect(SectionsExperimentModel.diagnosticReason("worker_unavailable").contains("read unknown"))
+    let splitCodes = [
+      "membership_nil_no_error", "membership_error", "membership_section_identity",
+      "membership_unnamed",
+    ]
+    let splitPhrases = splitCodes.map { SectionsExperimentModel.diagnosticReason($0) }
+    // Each split site has its own mapped phrase, pairwise distinct, never the
+    // unrecognized default; the legacy combined reason keeps its own mapping.
+    #expect(splitPhrases.allSatisfy { !$0.contains("unrecognized") })
+    #expect(Set(splitPhrases).count == splitPhrases.count)
+    #expect(
+      !SectionsExperimentModel.diagnosticReason("membership_unverified").contains("unrecognized"))
     #expect(
       SectionsExperimentModel.diagnosticReason("section_name_mismatch")
         != SectionsExperimentModel.diagnosticReason("membership_unverified"))
