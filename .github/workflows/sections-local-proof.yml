@@ -38,6 +38,15 @@ jobs:
       - name: Compile the opt-in attributed app and helper without launching either
         run: |
           set -euo pipefail
+          observe_state() {
+            if python3 -I -B scripts/sections-source-stamp.py --observe-build-state "$1"; then
+              :
+            else
+              printf '%s\n' 'Sections stamp build-state observation unavailable'
+            fi
+          }
+          observe_state before_build
+          trap 'result=$?; trap - EXIT; observe_state after_build; exit "$result"' EXIT
           xcodebuild build -project Arx.xcodeproj -scheme Arx -configuration Debug -xcconfig scripts/sections-attribution.xcconfig -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO -derivedDataPath .build/sections-proof
           python3 -I -B scripts/sections-verify-build-stamps.py attributed .build/sections-proof
       - name: Compile the ordinary route with untracked source and no attribution admission

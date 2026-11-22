@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+import sys
 import time
 
 MAX_FILES = 2048
@@ -32,24 +33,104 @@ def git(root, *arguments):
     return result.stdout
 
 
-def snapshot(root):
+def status_summary(status):
+    # Never retain or print porcelain operands, untracked names, or contents.
+    lines = status.splitlines()
+    result = {"entries": len(lines),
+              "untracked_entries": sum(line[:2] == b"??" for line in lines),
+              "root_lockfile": "not_listed", "workspace_lockfile": "not_listed"}
+    roles = {b"Package.resolved": "root_lockfile",
+             b"Arx.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved":
+             "workspace_lockfile"}
+    for line in lines:
+        if line[3:] in roles:
+            code = line[:2].decode("ascii", errors="replace")
+            result[roles[line[3:]]] = (code if len(code) == 2 and
+                all(c in " MADRCU?!T" for c in code) else "other")
+    return result
+
+
+def error_summary(error):
+    # No exception text, command, stderr, source operands, or environment values.
+    reasons = {
+        "git output exceeds stamp bound": "git_output_bound",
+        "unsupported revision format": "revision_format",
+        "source is not clean": "source_not_clean",
+        "source file count outside bound": "source_count_bound",
+        "tracked source differs from declared build inputs": "declared_inputs_mismatch",
+        "source stamp elapsed budget exceeded": "elapsed_budget",
+        "invalid tracked path": "invalid_tracked_path",
+        "non-directory source ancestor": "source_ancestor_type",
+        "source file type or size outside bound": "source_type_or_size",
+        "total source size outside bound": "source_total_size",
+        "source truncated during stamp": "source_truncated",
+        "source grew during stamp": "source_grew",
+        "source changed during stamp": "source_changed",
+        "source changed while stamping": "source_status_changed",
+        "revision changed while stamping": "revision_changed",
+    }
+    if isinstance(error, subprocess.TimeoutExpired):
+        return {"reason": "git_timeout"}
+    if isinstance(error, subprocess.CalledProcessError):
+        return {"reason": "git_nonzero", "exit_code": error.returncode}
+    if isinstance(error, OSError):
+        return {"reason": "os_error", "errno": error.errno}
+    if isinstance(error, UnicodeError):
+        return {"reason": "unicode_error"}
+    if isinstance(error, ValueError):
+        return {"reason": reasons.get(str(error), "value_error")}
+    return {"reason": "subprocess_error"}
+
+
+def emit_observation(record):
+    try:
+        print("Sections stamp observation: " + json.dumps(record, sort_keys=True), flush=True)
+    except OSError:
+        # Diagnostic output failure must not change source admission or header writing.
+        pass
+
+
+def observe_build_state(phase, root=None):
+    # Explicit proof-workflow observation only. Not called by ordinary compilation.
+    # One existing bounded read-only status command; no file content is printed.
+    record = {"kind": "build_state", "phase": phase if phase in
+              ("before_build", "after_build") else "other"}
+    try:
+        root = (Path.cwd() if root is None else root).resolve(strict=True)
+        record["status"] = status_summary(git(root, "status", "--porcelain=v1",
+                                               "--untracked-files=normal"))
+    except (OSError, ValueError, UnicodeError, subprocess.SubprocessError) as error:
+        record.update(error_summary(error))
+    emit_observation(record)
+
+
+def snapshot(root, observation=None):
+    observation = {} if observation is None else observation
     started = time.monotonic()
+    observation["stage"] = "revision_before"
     revision = git(root, "rev-parse", "--verify", "HEAD").decode().strip()
     if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
         raise ValueError("unsupported revision format")
-    if git(root, "status", "--porcelain=v1", "--untracked-files=normal"):
+    observation["stage"] = "status_before"
+    status = git(root, "status", "--porcelain=v1", "--untracked-files=normal")
+    observation["status_before"] = status_summary(status)
+    if status:
         raise ValueError("source is not clean")
+    observation["stage"] = "tracked_paths"
     paths = git(root, "ls-files", "-z").split(b"\0")
     paths = sorted(path for path in paths if path)
     if not paths or len(paths) > MAX_FILES:
         raise ValueError("source file count outside bound")
+    observation["stage"] = "declared_inputs"
     declared = (root / "scripts/sections-stamp-inputs.xcfilelist").read_text().splitlines()
     expected = ["$(SRCROOT)/" + os.fsdecode(path) for path in paths]
     if declared != expected:
         raise ValueError("tracked source differs from declared build inputs")
     digest = hashlib.sha256()
     total = 0
-    for name in paths:
+    for source_index, name in enumerate(paths, 1):
+        observation["stage"] = "source_file"
+        observation["source_index"] = source_index
         if time.monotonic() - started > MAX_SECONDS:
             raise ValueError("source stamp elapsed budget exceeded")
         relative = Path(os.fsdecode(name))
@@ -91,26 +172,40 @@ def snapshot(root):
         digest.update(name)
         digest.update((before.st_mode & 0o777).to_bytes(2, "big"))
         digest.update(content.digest())
-    if git(root, "status", "--porcelain=v1", "--untracked-files=normal"):
+    observation.pop("source_index", None)
+    observation["stage"] = "status_after"
+    status = git(root, "status", "--porcelain=v1", "--untracked-files=normal")
+    observation["status_after"] = status_summary(status)
+    if status:
         raise ValueError("source changed while stamping")
+    observation["stage"] = "revision_after"
     if git(root, "rev-parse", "--verify", "HEAD").decode().strip() != revision:
         raise ValueError("revision changed while stamping")
+    observation["stage"] = "complete"
     return {"schema": 1, "revision": revision, "manifestSHA256": digest.hexdigest(),
             "files": len(paths), "sourceBytes": total, "claim": "clean source snapshot"}
 
 
 def main():
     observed = None
+    observation = {"stage": "not_requested"}
     required = os.environ.get("ARX_SECTIONS_ATTRIBUTION") == "YES"
     if required:
         try:
-            observed = snapshot(Path(os.environ["SRCROOT"]).resolve(strict=True))
-        except (OSError, ValueError, UnicodeError, subprocess.SubprocessError):
+            observation["stage"] = "source_root"
+            observed = snapshot(Path(os.environ["SRCROOT"]).resolve(strict=True), observation)
+        except (OSError, ValueError, UnicodeError, subprocess.SubprocessError) as error:
+            observation.update(error_summary(error))
             # Ordinary compilation is not made conditional on source cleanliness.
             # Unverified attribution is represented by empty compiled fields.
             observed = None
     revision = observed["revision"] if observed else ""
     manifest = observed["manifestSHA256"] if observed else ""
+    target = {"Arx": "app", "ArxSectionsWorker": "helper"}.get(
+        os.environ.get("TARGET_NAME"), "other")
+    emit_observation({"kind": "source_snapshot", "target": target,
+                      "required": required, "revision": revision,
+                      "manifestSHA256": manifest, "observation": observation})
     destination = Path(os.environ["DERIVED_FILE_DIR"]) / "ArxSectionsBuildStamp.h"
     header = ("// Generated source attribution, empty means unavailable.\n"
               "#define ARX_SECTIONS_SOURCE_REVISION @\"" + revision + "\"\n"
@@ -126,4 +221,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] in (["--observe-build-state", "before_build"],
+                        ["--observe-build-state", "after_build"]):
+        observe_build_state(sys.argv[2])
+    else:
+        main()
