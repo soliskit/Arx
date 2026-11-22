@@ -2,3 +2,4 @@
 ARX_SECTIONS_ATTRIBUTION = YES
 ARX_SECTIONS_ATTRIBUTION_GIT_INPUT = $(SRCROOT)/.git
 ARX_SECTIONS_ATTRIBUTION_INPUTS = $(SRCROOT)/scripts/sections-stamp-inputs.xcfilelist
+ARX_SECTIONS_METADATA_INPUTS = $(SRCROOT)/.build/sections-proof-git-metadata.xcfilelist

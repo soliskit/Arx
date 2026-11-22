@@ -45,6 +45,7 @@ jobs:
               printf '%s\n' 'Sections stamp build-state observation unavailable'
             fi
           }
+          python3 -I -B scripts/sections-source-stamp.py --prepare-git-metadata-inputs
           observe_state before_build
           trap 'result=$?; trap - EXIT; observe_state after_build; exit "$result"' EXIT
           xcodebuild build -project Arx.xcodeproj -scheme Arx -configuration Debug -xcconfig scripts/sections-attribution.xcconfig -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO -derivedDataPath .build/sections-proof

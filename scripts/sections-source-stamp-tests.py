@@ -298,5 +298,148 @@ class SourceStampTests(unittest.TestCase):
         self.assertNotIn(marker, output.getvalue())
 
 
+
+    def test_metadata_inputs_are_sorted_fixed_scope_without_content_reads(self):
+        metadata = self.root / ".git"
+        (metadata / "info/attributes").write_text("fixture\n")
+        (metadata / "info/private-note").write_text("private fixture\n")
+        with mock.patch.object(self.module.os, "read", side_effect=AssertionError):
+            with mock.patch.object(self.module, "git", side_effect=AssertionError):
+                lines = self.module.metadata_input_lines(self.root)
+        self.assertEqual(lines, sorted(set(lines)))
+        for role in ("", "/HEAD", "/config", "/index", "/refs", "/objects",
+                     "/info/exclude", "/info/attributes"):
+            self.assertIn("$(SRCROOT)/.git" + role, lines)
+        self.assertTrue(all(line.startswith("$(SRCROOT)/.git") for line in lines))
+        self.assertFalse(any("/hooks" in line or "/logs" in line or
+                             "private-note" in line for line in lines))
+        self.assertNotIn(str(self.root), "\n".join(lines))
+
+    def test_metadata_optional_fixed_files_and_missing_optional_roles(self):
+        metadata = self.root / ".git"
+        for name in ("config.worktree", "packed-refs", "shallow"):
+            path = metadata / name
+            path.unlink(missing_ok=True)
+            self.assertNotIn("$(SRCROOT)/.git/" + name,
+                             self.module.metadata_input_lines(self.root))
+            path.write_text("sensitive-metadata-fixture\n")
+            self.assertIn("$(SRCROOT)/.git/" + name,
+                          self.module.metadata_input_lines(self.root))
+        self.assertNotIn("sensitive-metadata-fixture",
+                         "\n".join(self.module.metadata_input_lines(self.root)))
+
+    def test_metadata_missing_or_wrong_type_required_file_refuses(self):
+        index = self.root / ".git/index"
+        index.unlink()
+        with self.assertRaises(ValueError):
+            self.module.metadata_input_lines(self.root)
+        index.mkdir()
+        with self.assertRaises(ValueError):
+            self.module.metadata_input_lines(self.root)
+
+    def test_metadata_symlink_root_and_descendant_refuse(self):
+        link = self.root / ".git/refs/unsafe"
+        link.symlink_to(self.root / "source.txt")
+        with self.assertRaises(ValueError):
+            self.module.metadata_input_lines(self.root)
+        link.unlink()
+        (self.root / ".git").rename(self.root / ".git-original")
+        (self.root / ".git").symlink_to(self.root / ".git-original")
+        with self.assertRaises(OSError):
+            self.module.metadata_input_lines(self.root)
+
+    def test_metadata_unsafe_components_refuse_without_output(self):
+        for name in ("unsafe$(name)", "unsafe\nname", "unsafe name"):
+            with self.subTest(name=name):
+                path = self.root / ".git/refs" / name
+                path.write_text("fixture\n")
+                try:
+                    with self.assertRaises(ValueError):
+                        self.module.metadata_input_lines(self.root)
+                finally:
+                    path.unlink()
+        self.assertFalse((self.root / ".build").exists())
+
+    def test_metadata_shared_and_external_object_stores_refuse(self):
+        for name in ("commondir", "objects/info/alternates",
+                     "objects/info/http-alternates"):
+            with self.subTest(role=name):
+                path = self.root / ".git" / name
+                path.write_text("sensitive-external-fixture\n")
+                try:
+                    with self.assertRaises(ValueError):
+                        self.module.metadata_input_lines(self.root)
+                finally:
+                    path.unlink()
+
+    def test_metadata_entry_depth_elapsed_and_output_bounds_refuse(self):
+        for constant, value in (("METADATA_MAX_ENTRIES", 2),
+                                ("METADATA_MAX_DEPTH", 0), ("MAX_OUTPUT", 8)):
+            with self.subTest(bound=constant):
+                with mock.patch.object(self.module, constant, value):
+                    with self.assertRaises(ValueError):
+                        self.module.metadata_input_lines(self.root)
+        with mock.patch.object(self.module.time, "monotonic", side_effect=[0.0, 16.0]):
+            with self.assertRaises(ValueError):
+                self.module.metadata_input_lines(self.root)
+        self.assertFalse((self.root / ".build").exists())
+
+    def test_metadata_preparation_writes_only_fixed_private_input_list(self):
+        with mock.patch.object(self.module, "snapshot", side_effect=AssertionError):
+            with mock.patch.object(self.module, "git", side_effect=AssertionError):
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    receipt = self.module.prepare_git_metadata_inputs(self.root)
+        destination = self.root / ".build" / self.module.METADATA_OUTPUT
+        text = destination.read_text()
+        self.assertEqual(text, "\n".join(self.module.metadata_input_lines(self.root)) + "\n")
+        self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(receipt, {"entries": len(text.splitlines()),
+                                   "bytes": len(text.encode("utf-8"))})
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(list((self.root / ".build").iterdir()), [destination])
+
+    def test_metadata_existing_output_and_output_symlink_are_not_overwritten(self):
+        build = self.root / ".build"
+        build.mkdir()
+        destination = build / self.module.METADATA_OUTPUT
+        destination.write_text("preserve fixture\n")
+        with self.assertRaises(FileExistsError):
+            self.module.prepare_git_metadata_inputs(self.root)
+        self.assertEqual(destination.read_text(), "preserve fixture\n")
+        destination.unlink()
+        destination.symlink_to(self.root / "source.txt")
+        with self.assertRaises(FileExistsError):
+            self.module.prepare_git_metadata_inputs(self.root)
+        self.assertEqual((self.root / "source.txt").read_text(), "fixture\n")
+
+    def test_metadata_build_directory_symlink_is_refused(self):
+        with tempfile.TemporaryDirectory(prefix="sections-output-fixture-") as other:
+            (self.root / ".build").symlink_to(other)
+            with self.assertRaises(OSError):
+                self.module.prepare_git_metadata_inputs(self.root)
+            self.assertEqual(list(Path(other).iterdir()), [])
+
+    def test_metadata_directory_open_failure_closes_owned_descriptors(self):
+        real_open, real_close = os.open, os.close
+        outstanding = set()
+
+        def opened(name, *args, **kwargs):
+            if name == "refs":
+                raise PermissionError(13, "sensitive-fixture")
+            descriptor = real_open(name, *args, **kwargs)
+            outstanding.add(descriptor)
+            return descriptor
+
+        def closed(descriptor):
+            outstanding.remove(descriptor)
+            real_close(descriptor)
+
+        with mock.patch.object(self.module.os, "open", side_effect=opened):
+            with mock.patch.object(self.module.os, "close", side_effect=closed):
+                with self.assertRaises(PermissionError):
+                    self.module.metadata_input_lines(self.root)
+        self.assertFalse(outstanding)
+
+
 if __name__ == "__main__":
     unittest.main(failfast=True)

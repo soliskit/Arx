@@ -360,8 +360,143 @@ def main():
         os.fsync(stream.fileno())
 
 
+METADATA_MAX_ENTRIES = 2048
+METADATA_MAX_DEPTH = 32
+METADATA_MAX_SECONDS = 15
+METADATA_OUTPUT = "sections-proof-git-metadata.xcfilelist"
+METADATA_ROLES = (("HEAD", "file", True), ("config", "file", True),
+                  ("index", "file", True), ("refs", "directory", True),
+                  ("objects", "directory", True),
+                  ("config.worktree", "file", False),
+                  ("packed-refs", "file", False), ("shallow", "file", False),
+                  ("info", "directory", False))
+
+
+def metadata_input_lines(root):
+    # Explicit proof preparation only. No file contents, Git execution or
+    # grants outside this checkout. This is not a sealed metadata snapshot.
+    root = Path(root).resolve(strict=True)
+    started = time.monotonic()
+    entries = 1
+    paths = {"$(SRCROOT)/.git"}
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK
+
+    def check_bound():
+        if time.monotonic() - started > METADATA_MAX_SECONDS:
+            raise ValueError("metadata elapsed bound")
+
+    def same_identity(before, after):
+        return (before.st_dev, before.st_ino, before.st_mode) == (
+            after.st_dev, after.st_ino, after.st_mode)
+
+    def visit(parent, name, relative, expected=None, required=True, depth=0):
+        nonlocal entries
+        check_bound()
+        entries += 1
+        if entries > METADATA_MAX_ENTRIES or depth > METADATA_MAX_DEPTH:
+            raise ValueError("metadata inventory bound")
+        if name in (".", "..") or re.fullmatch(r"[A-Za-z0-9._-]+", name) is None:
+            raise ValueError("unsafe metadata component")
+        if relative in ("objects/info/alternates", "objects/info/http-alternates"):
+            raise ValueError("external object store unsupported")
+        try:
+            before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            if not required:
+                return
+            raise ValueError("required metadata missing") from None
+        kind = ("directory" if stat.S_ISDIR(before.st_mode) else
+                "file" if stat.S_ISREG(before.st_mode) else "other")
+        if kind == "other" or (expected is not None and kind != expected):
+            raise ValueError("metadata type refused")
+        paths.add("$(SRCROOT)/.git/" + relative)
+        if kind == "directory":
+            descriptor = os.open(name, directory_flags, dir_fd=parent)
+            try:
+                if not same_identity(before, os.fstat(descriptor)):
+                    raise ValueError("metadata directory changed")
+                if relative == "info":
+                    # status can consult these two fixed per-repository files.
+                    # No recursive grant for unrelated info-directory data.
+                    for child in ("exclude", "attributes"):
+                        visit(descriptor, child, relative + "/" + child,
+                              "file", False, depth + 1)
+                else:
+                    with os.scandir(descriptor) as children:
+                        for child in children:
+                            visit(descriptor, child.name, relative + "/" + child.name,
+                                  depth=depth + 1)
+                after = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                if not same_identity(before, after):
+                    raise ValueError("metadata directory changed")
+            finally:
+                os.close(descriptor)
+
+    root_descriptor = os.open(root, directory_flags)
+    try:
+        before = os.stat(".git", dir_fd=root_descriptor, follow_symlinks=False)
+        metadata = os.open(".git", directory_flags, dir_fd=root_descriptor)
+        try:
+            if not same_identity(before, os.fstat(metadata)):
+                raise ValueError("metadata root changed")
+            try:
+                os.stat("commondir", dir_fd=metadata, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                raise ValueError("shared metadata unsupported")
+            for name, expected, required in METADATA_ROLES:
+                visit(metadata, name, name, expected, required)
+            after = os.stat(".git", dir_fd=root_descriptor, follow_symlinks=False)
+            if not same_identity(before, after):
+                raise ValueError("metadata root changed")
+            check_bound()
+        finally:
+            os.close(metadata)
+    finally:
+        os.close(root_descriptor)
+    result = sorted(paths)
+    if len(("\n".join(result) + "\n").encode("utf-8")) > MAX_OUTPUT:
+        raise ValueError("metadata output bound")
+    return result
+
+
+def prepare_git_metadata_inputs(root=None):
+    root = (Path.cwd() if root is None else Path(root)).resolve(strict=True)
+    lines = metadata_input_lines(root)
+    text = "\n".join(lines) + "\n"
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK
+    root_descriptor = os.open(root, directory_flags)
+    try:
+        try:
+            os.mkdir(".build", mode=0o700, dir_fd=root_descriptor)
+        except FileExistsError:
+            pass
+        build = os.open(".build", directory_flags, dir_fd=root_descriptor)
+        try:
+            descriptor = os.open(METADATA_OUTPUT,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NONBLOCK,
+                0o600, dir_fd=build)
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+                stream.write(text)
+                stream.flush()
+                os.fsync(stream.fileno())
+        finally:
+            os.close(build)
+    finally:
+        os.close(root_descriptor)
+    return {"entries": len(lines), "bytes": len(text.encode("utf-8"))}
+
+
 if __name__ == "__main__":
-    if sys.argv[1:] in (["--observe-build-state", "before_build"],
+    if sys.argv[1:] == ["--prepare-git-metadata-inputs"]:
+        try:
+            result = prepare_git_metadata_inputs()
+        except (OSError, ValueError):
+            emit_observation({"kind": "metadata_input_preparation", "status": "unavailable"})
+            raise SystemExit(1) from None
+        emit_observation({"kind": "metadata_input_preparation", "status": "prepared", **result})
+    elif sys.argv[1:] in (["--observe-build-state", "before_build"],
                         ["--observe-build-state", "after_build"]):
         observe_build_state(sys.argv[2])
     else:
