@@ -191,7 +191,7 @@
     "ARX_SECTIONS_ATTRIBUTION": "NO",
     "ARX_SECTIONS_ATTRIBUTION_GIT_INPUT": "$(SRCROOT)/scripts/sections-source-stamp.py",
     "ARX_SECTIONS_ATTRIBUTION_INPUTS": "$(SRCROOT)/scripts/sections-stamp-default-inputs.xcfilelist",
-    "ARX_SECTIONS_METADATA_INPUTS": "$(SRCROOT)/scripts/sections-stamp-default-inputs.xcfilelist",
+    "ARX_SECTIONS_METADATA_INPUTS": "$(SRCROOT)/scripts/sections-stamp-default-metadata-inputs.xcfilelist",
     "ALWAYS_SEARCH_USER_PATHS": "NO",
     "ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS": "YES",
     "CLANG_ANALYZER_NONNULL": "YES",

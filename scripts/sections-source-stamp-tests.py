@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -439,6 +440,53 @@ class SourceStampTests(unittest.TestCase):
                 with self.assertRaises(PermissionError):
                     self.module.metadata_input_lines(self.root)
         self.assertFalse(outstanding)
+
+
+class OrdinaryInputListBindingTests(unittest.TestCase):
+    """Source/config regression checks only, not Xcode scheduling proof."""
+    def test_distinct_default_metadata_list_preserves_non_git_dependency(self):
+        root = Path(__file__).resolve().parent.parent
+        project = (root / "Arx.xcodeproj/project.xcproj").read_text()
+        prefix = "$(SRCROOT)/scripts/"
+        values = {}
+        for key in ("ARX_SECTIONS_ATTRIBUTION_INPUTS", "ARX_SECTIONS_METADATA_INPUTS"):
+            matches = re.findall(r'"' + re.escape(key) + r'":\s*"([^"\n]+)"', project)
+            self.assertEqual(len(matches), 1)
+            values[key] = matches[0]
+        self.assertNotEqual(values["ARX_SECTIONS_ATTRIBUTION_INPUTS"],
+                            values["ARX_SECTIONS_METADATA_INPUTS"])
+        self.assertEqual(values["ARX_SECTIONS_ATTRIBUTION_INPUTS"],
+                         prefix + "sections-stamp-default-inputs.xcfilelist")
+        self.assertEqual(values["ARX_SECTIONS_METADATA_INPUTS"],
+                         prefix + "sections-stamp-default-metadata-inputs.xcfilelist")
+        expected = b"$(SRCROOT)/scripts/sections-source-stamp.py\n"
+        for value in values.values():
+            path = root / value.removeprefix("$(SRCROOT)/")
+            self.assertFalse(path.is_symlink())
+            self.assertTrue(path.is_file())
+            self.assertEqual(path.read_bytes(), expected)
+        declarations = re.findall(r'"input-file-list-paths":\s*\[([^\]]+)\]', project)
+        self.assertEqual(len(declarations), 2)
+        for declaration in declarations:
+            roles = re.findall(r'"\$\((ARX_SECTIONS_[A-Z_]+)\)"', declaration)
+            self.assertEqual(roles, ["ARX_SECTIONS_ATTRIBUTION_INPUTS",
+                                     "ARX_SECTIONS_METADATA_INPUTS"])
+            self.assertEqual(len({values[role] for role in roles}), len(roles))
+
+    def test_optin_lists_stay_distinct_and_use_existing_bounded_metadata(self):
+        root = Path(__file__).resolve().parent.parent
+        text = (root / "scripts/sections-attribution.xcconfig").read_text()
+        values = {}
+        for line in text.splitlines():
+            if line.startswith("ARX_SECTIONS_") and " = " in line:
+                key, value = line.split(" = ", 1)
+                values[key] = value
+        self.assertEqual(values["ARX_SECTIONS_ATTRIBUTION_INPUTS"],
+                         "$(SRCROOT)/scripts/sections-stamp-inputs.xcfilelist")
+        self.assertEqual(values["ARX_SECTIONS_METADATA_INPUTS"],
+                         "$(SRCROOT)/.build/sections-proof-git-metadata.xcfilelist")
+        self.assertNotEqual(values["ARX_SECTIONS_ATTRIBUTION_INPUTS"],
+                            values["ARX_SECTIONS_METADATA_INPUTS"])
 
 
 if __name__ == "__main__":
