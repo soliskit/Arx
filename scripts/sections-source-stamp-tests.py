@@ -444,6 +444,21 @@ class SourceStampTests(unittest.TestCase):
 
 class OrdinaryInputListBindingTests(unittest.TestCase):
     """Source/config regression checks only, not Xcode scheduling proof."""
+    def test_tracked_source_allowlist_is_complete_sorted_and_unique(self):
+        root = Path(__file__).resolve().parent.parent
+        tracked = subprocess.run(
+            ["/usr/bin/git", "-C", str(root), "ls-files", "-z"],
+            check=True, capture_output=True, timeout=5,
+        ).stdout.split(b"\0")
+        tracked = sorted(path for path in tracked if path)
+        self.assertTrue(tracked)
+        expected = ["$(SRCROOT)/" + os.fsdecode(path) for path in tracked]
+        declared = (root / "scripts/sections-stamp-inputs.xcfilelist").read_text().splitlines()
+        self.assertEqual(declared, expected)
+        self.assertEqual(len(declared), len(set(declared)))
+        self.assertIn("$(SRCROOT)/scripts/sections-stamp-default-metadata-inputs.xcfilelist",
+                      declared)
+
     def test_distinct_default_metadata_list_preserves_non_git_dependency(self):
         root = Path(__file__).resolve().parent.parent
         project = (root / "Arx.xcodeproj/project.xcproj").read_text()

@@ -102,6 +102,7 @@ $(SRCROOT)/scripts/sections-attribution.xcconfig
 $(SRCROOT)/scripts/sections-source-stamp-tests.py
 $(SRCROOT)/scripts/sections-source-stamp.py
 $(SRCROOT)/scripts/sections-stamp-default-inputs.xcfilelist
+$(SRCROOT)/scripts/sections-stamp-default-metadata-inputs.xcfilelist
 $(SRCROOT)/scripts/sections-stamp-inputs.xcfilelist
 $(SRCROOT)/scripts/sections-verify-build-stamps.py
 $(SRCROOT)/scripts/web-logic.test.mjs
