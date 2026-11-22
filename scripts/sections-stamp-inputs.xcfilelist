@@ -88,6 +88,7 @@ $(SRCROOT)/package.json
 $(SRCROOT)/scripts/browser-edits.mjs
 $(SRCROOT)/scripts/browser-input.mjs
 $(SRCROOT)/scripts/browser-outcomes.mjs
+$(SRCROOT)/scripts/browser-proof-safari.mjs
 $(SRCROOT)/scripts/browser-proof.mjs
 $(SRCROOT)/scripts/browser-startup.mjs
 $(SRCROOT)/scripts/browser-startup.test.mjs
