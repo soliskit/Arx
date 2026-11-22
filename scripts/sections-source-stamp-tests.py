@@ -199,5 +199,104 @@ class SourceStampTests(unittest.TestCase):
         self.assertNotIn("private fixture", output.getvalue())
 
 
+    def test_git_visibility_fixed_schema_and_no_values(self):
+        marker = "sensitive-visibility-fixture-value"
+        with mock.patch.dict(os.environ, {"GIT_DIR": marker,
+                                         "GIT_WORK_TREE": marker}):
+            with mock.patch.object(self.module.time, "monotonic", return_value=0.0):
+                with mock.patch.object(self.module.os, "read", side_effect=AssertionError(marker)):
+                    result = self.module.git_visibility(self.root, 1.0)
+        self.assertEqual(set(result["roles"]),
+                         {"metadata", "head", "refs", "packed_refs", "objects", "config", "index"})
+        self.assertEqual(result["roles"]["metadata"],
+                         {"kind": "directory", "stat": "ok", "open": "opened"})
+        self.assertEqual(result["roles"]["head"]["open"], "opened")
+        self.assertTrue(result["env_presence"]["git_dir_set"])
+        self.assertTrue(result["env_presence"]["work_tree_set"])
+        self.assertTrue(all(type(v) is bool for v in result["env_presence"].values()))
+        encoded = json.dumps(result)
+        self.assertNotIn(marker, encoded)
+        self.assertNotIn(str(self.root), encoded)
+        self.assertLess(len(encoded), 1024)
+
+    def test_git_visibility_denials_symlinks_and_descriptor_cleanup(self):
+        marker = "sensitive-visibility-fixture-value"
+        target = self.root / marker
+        target.write_text(marker)
+        packed = self.root / ".git" / "packed-refs"
+        packed.unlink(missing_ok=True)
+        packed.symlink_to(target)
+        real_open, real_close = os.open, os.close
+        outstanding, forbidden = set(), []
+
+        def opened(name, *args, **kwargs):
+            if name == "HEAD":
+                raise PermissionError(13, marker)
+            if name == "packed-refs":
+                forbidden.append(name)
+                raise OSError(40, marker)
+            descriptor = real_open(name, *args, **kwargs)
+            outstanding.add(descriptor)
+            return descriptor
+
+        def closed(descriptor):
+            real_close(descriptor)
+            outstanding.remove(descriptor)
+
+        with mock.patch.object(self.module.time, "monotonic", return_value=0.0):
+            with mock.patch.object(self.module.os, "open", side_effect=opened):
+                with mock.patch.object(self.module.os, "close", side_effect=closed):
+                    result = self.module.git_visibility(self.root, 1.0)
+        self.assertEqual(result["roles"]["head"]["open"], "denied")
+        self.assertEqual(result["roles"]["packed_refs"]["kind"], "symlink")
+        self.assertEqual(result["roles"]["packed_refs"]["open"], "symlink_refused")
+        self.assertEqual(outstanding, set())
+        self.assertEqual(forbidden, [])
+        self.assertNotIn(marker, json.dumps(result))
+        original = self.root / ".git-owned-fixture"
+        (self.root / ".git").rename(original)
+        (self.root / ".git").symlink_to(original, target_is_directory=True)
+        with mock.patch.object(self.module.time, "monotonic", return_value=0.0):
+            with mock.patch.object(self.module.os, "open") as no_open:
+                result = self.module.git_visibility(self.root, 1.0)
+        no_open.assert_not_called()
+        self.assertEqual(result["roles"]["metadata"]["open"], "symlink_refused")
+
+    def test_git_visibility_expired_deadline_starts_no_filesystem_probe(self):
+        with mock.patch.object(self.module.time, "monotonic", return_value=1.0):
+            with mock.patch.object(self.module.os, "stat") as no_stat:
+                with mock.patch.object(self.module.os, "open") as no_open:
+                    result = self.module.git_visibility(self.root, 0.0)
+        no_stat.assert_not_called()
+        no_open.assert_not_called()
+        self.assertEqual(result["roles"]["metadata"]["stat"], "budget_exhausted")
+        self.assertLess(len(json.dumps(result)), 1024)
+
+    def test_git_visibility_failure_never_overrides_existing_admission(self):
+        marker = "sensitive-visibility-fixture-value"
+        observation = {}
+        output, header_output = io.StringIO(), io.StringIO()
+        with mock.patch.object(self.module, "git_visibility", side_effect=RuntimeError(marker)):
+            snapshot = self.module.snapshot(self.root, observation)
+            with contextlib.redirect_stdout(output):
+                self.module.observe_build_state("before_build", self.root)
+            with tempfile.TemporaryDirectory(prefix="sections-derived-") as build:
+                with mock.patch.dict(os.environ, {"DERIVED_FILE_DIR": build,
+                        "SRCROOT": str(self.root), "ARX_SECTIONS_ATTRIBUTION": "YES"}):
+                    with contextlib.redirect_stdout(header_output):
+                        self.module.main()
+                header = (Path(build) / "ArxSectionsBuildStamp.h").read_text()
+        self.assertEqual(len(snapshot["revision"]), 40)
+        self.assertIn('REVISION @"' + snapshot["revision"] + '"', header)
+        self.assertIn('MANIFEST @"' + snapshot["manifestSHA256"] + '"', header)
+        self.assertIn('REQUIRES_ATTRIBUTION 1', header)
+        self.assertNotIn(marker, header_output.getvalue())
+        self.assertEqual(observation["git_visibility"], {"status": "unavailable"})
+        record = json.loads(output.getvalue().split(": ", 1)[1])
+        self.assertEqual(record["git_visibility"], {"status": "unavailable"})
+        self.assertEqual(record["status"]["entries"], 0)
+        self.assertNotIn(marker, output.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(failfast=True)

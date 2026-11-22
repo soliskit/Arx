@@ -5,6 +5,7 @@ Invoked by proposed per-target build phases, not run during preparation.
 Both targets compile their source stamp through a generated header.
 This observes source for attribution; it does not attest the compiler or kernel.
 """
+import errno
 import hashlib
 import json
 import os
@@ -34,6 +35,105 @@ GIT_FATAL_CLASSES = (
     (b"Permission denied", "git_permission_denied"),
     (b"unable to access", "git_unable_to_access"),
 )
+
+
+VISIBILITY_SECONDS = 0.25
+VISIBILITY_ROLES = (("head", "HEAD"), ("refs", "refs"),
+                    ("packed_refs", "packed-refs"), ("objects", "objects"),
+                    ("config", "config"), ("index", "index"))
+VISIBILITY_ENV = (("git_dir_set", "GIT_DIR"),
+                  ("work_tree_set", "GIT_WORK_TREE"),
+                  ("common_dir_set", "GIT_COMMON_DIR"),
+                  ("ceiling_set", "GIT_CEILING_DIRECTORIES"),
+                  ("cross_filesystem_set", "GIT_DISCOVERY_ACROSS_FILESYSTEM"))
+
+
+def visibility_error(error):
+    if error.errno in (errno.EACCES, errno.EPERM):
+        return "denied"
+    if error.errno in (errno.ENOENT, errno.ENOTDIR):
+        return "missing"
+    if error.errno == errno.ELOOP:
+        return "symlink_refused"
+    return "other_error"
+
+
+def git_visibility(root, deadline):
+    # Fixed roles only. No directory listing, file data, paths or env values
+    # are retained. This deadline stops new probes, not in-flight OS calls.
+    records = {role: {"kind": "unknown", "stat": "not_attempted",
+                      "open": "not_attempted"}
+               for role in ("metadata", *(role for role, _ in VISIBILITY_ROLES))}
+    result = {"roles": records,
+              "env_presence": {role: name in os.environ for role, name in VISIBILITY_ENV}}
+
+    def entry(role, name, parent=None, retain=False):
+        record = records[role]
+        if time.monotonic() >= deadline:
+            record["stat"] = "budget_exhausted"
+            return None
+        try:
+            before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except OSError as error:
+            record["stat"] = visibility_error(error)
+            return None
+        record["stat"] = "ok"
+        mode = before.st_mode
+        record["kind"] = ("symlink" if stat.S_ISLNK(mode) else
+                          "directory" if stat.S_ISDIR(mode) else
+                          "regular" if stat.S_ISREG(mode) else "other")
+        if stat.S_ISLNK(mode):
+            record["open"] = "symlink_refused"
+            return None
+        if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+            record["open"] = "wrong_type"
+            return None
+        if time.monotonic() >= deadline:
+            record["open"] = "budget_exhausted"
+            return None
+        descriptor = None
+        try:
+            flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+            if stat.S_ISDIR(mode):
+                flags |= os.O_DIRECTORY
+            descriptor = os.open(name, flags, dir_fd=parent)
+            after = os.fstat(descriptor)
+            if (before.st_dev, before.st_ino, before.st_mode) != (
+                    after.st_dev, after.st_ino, after.st_mode):
+                record["open"] = "changed"
+                return None
+            record["open"] = "opened"
+            if retain and stat.S_ISDIR(after.st_mode):
+                owned = descriptor
+                descriptor = None
+                return owned
+        except OSError as error:
+            record["open"] = visibility_error(error)
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+        return None
+
+    descriptor = entry("metadata", root / ".git", retain=True)
+    if descriptor is not None:
+        try:
+            for role, name in VISIBILITY_ROLES:
+                entry(role, name, parent=descriptor)
+        finally:
+            os.close(descriptor)
+    return result
+
+
+def observed_git_visibility(root, deadline=None):
+    # Best-effort observation never overrides snapshot admission. Its time
+    # consumes the caller's existing snapshot elapsed window when provided.
+    checked_deadline = time.monotonic() + VISIBILITY_SECONDS
+    if deadline is not None:
+        checked_deadline = min(checked_deadline, deadline)
+    try:
+        return git_visibility(root, checked_deadline)
+    except Exception:
+        return {"status": "unavailable"}
 
 
 def git(root, *arguments):
@@ -135,6 +235,7 @@ def observe_build_state(phase, root=None):
               ("before_build", "after_build") else "other"}
     try:
         root = (Path.cwd() if root is None else root).resolve(strict=True)
+        record["git_visibility"] = observed_git_visibility(root)
         record["status"] = status_summary(git(root, "status", "--porcelain=v1",
                                                "--untracked-files=normal"))
     except (OSError, ValueError, UnicodeError, subprocess.SubprocessError) as error:
@@ -145,6 +246,7 @@ def observe_build_state(phase, root=None):
 def snapshot(root, observation=None):
     observation = {} if observation is None else observation
     started = time.monotonic()
+    observation["git_visibility"] = observed_git_visibility(root, started + MAX_SECONDS)
     observation["stage"] = "revision_before"
     revision = git(root, "rev-parse", "--verify", "HEAD").decode().strip()
     if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
