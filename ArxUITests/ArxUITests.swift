@@ -2220,6 +2220,22 @@ final class ArxAuditMappingDiagnosticTests: XCTestCase {
     try runMappingAudit(on: application)
   }
 
+  /// Diagnostic C: capsule ablation. Same cell as diagnostic A with
+  /// only the explicit white background removed. Zero findings and any
+  /// findings are recorded in full through the same two channels;
+  /// neither outcome is a pass/fail oracle for anything.
+  @MainActor
+  func testDiagnosticBlackNoBackgroundMapping() throws {
+    let application = try launchDiagnostic(
+      argument: "--arx-calibration-black-no-background",
+      artifactName: "diagnostic-black-no-background-audit-window.png")
+    _ = try requireUniqueTarget(
+      "calibration-black-on-white",
+      label: "Calibration black-on-white control text",
+      in: application)
+    try runMappingAudit(on: application)
+  }
+
   /// Diagnostic B: the low-contrast control cell. Expected to produce
   /// at least one finding; every finding is recorded in full and
   /// reported natively, so this test is expected to fail and its

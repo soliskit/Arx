@@ -370,6 +370,14 @@
     }
 
     /// True only when a diagnostic test passes
+    /// --arx-calibration-black-no-background: the same literal black
+    /// caption cell as calibration-black-on-white with ONLY the explicit
+    /// white background removed.
+    private var calibrationBlackNoBackgroundRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-calibration-black-no-background")
+    }
+
+    /// True only when a diagnostic test passes
     /// --arx-calibration-low-contrast: one literal gray caption
     /// (white 0.7, about 2.1:1 by sRGB math, clearly below the 4.5:1
     /// bar) on the same explicit white background. The calibration
@@ -715,6 +723,8 @@
         bridgeStatusGroupBoxDetail
       } else if calibrationBlackOnWhiteRequested {
         calibrationBlackOnWhiteDetail
+      } else if calibrationBlackNoBackgroundRequested {
+        calibrationBlackNoBackgroundDetail
       } else if calibrationLowContrastRequested {
         calibrationLowContrastDetail
       } else {
@@ -891,6 +901,24 @@
           .foregroundStyle(Color.black)
           .padding(8)
           .background(Color.white)
+          .accessibilityIdentifier("calibration-black-on-white")
+      }
+      .padding(24)
+      .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
+      .navigationTitle("Fixture Sharing")
+    }
+
+    /// Ablation cell: identical to the black-on-white control except the
+    /// explicit white background is removed. Text, identifier, font,
+    /// foreground, padding and column are unchanged; only the capsule
+    /// differs. What the caption's background pair is at engine sample
+    /// time without the capsule is not established by any capture.
+    @ViewBuilder private var calibrationBlackNoBackgroundDetail: some View {
+      VStack(alignment: .leading, spacing: 0) {
+        Text("Calibration black-on-white control text")
+          .font(.caption)
+          .foregroundStyle(Color.black)
+          .padding(8)
           .accessibilityIdentifier("calibration-black-on-white")
       }
       .padding(24)
