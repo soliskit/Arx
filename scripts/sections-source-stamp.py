@@ -20,6 +20,20 @@ MAX_FILE = 16 * 1024 * 1024
 MAX_TOTAL = 128 * 1024 * 1024
 MAX_OUTPUT = 256 * 1024
 MAX_SECONDS = 15
+GIT_FATAL_SCAN = 4096
+GIT_FATAL_CLASSES = (
+    # Ordered: specific target signatures before generic errno signatures, so a
+    # denied config read reports its config class rather than the bare errno.
+    (b"detected dubious ownership", "git_dubious_ownership"),
+    (b"unsafe repository", "git_dubious_ownership"),
+    (b"unable to read config file", "git_config_unreadable"),
+    (b"bad config", "git_config_invalid"),
+    (b"not a git repository", "git_not_a_repository"),
+    (b"cannot change to", "git_cannot_chdir"),
+    (b"Operation not permitted", "git_operation_not_permitted"),
+    (b"Permission denied", "git_permission_denied"),
+    (b"unable to access", "git_unable_to_access"),
+)
 
 
 def git(root, *arguments):
@@ -50,8 +64,32 @@ def status_summary(status):
     return result
 
 
+def git_fatal_summary(error):
+    # Fixed labels only: the matched signature class and stderr length, never
+    # raw text, paths, operands, or environment values. Matching scans at most
+    # the first GIT_FATAL_SCAN bytes; the recorded length is the full count.
+    data = error.stderr if isinstance(error.stderr, bytes) else None
+    if data is None:
+        return {"reason": "git_nonzero", "exit_code": error.returncode,
+                "git_fatal_class": "git_stderr_unavailable"}
+    summary = {"reason": "git_nonzero", "exit_code": error.returncode,
+               "git_stderr_length": len(data)}
+    if not data:
+        summary["git_fatal_class"] = "git_stderr_empty"
+        return summary
+    scanned = data[:GIT_FATAL_SCAN]
+    for signature, label in GIT_FATAL_CLASSES:
+        if signature in scanned:
+            summary["git_fatal_class"] = label
+            break
+    else:
+        summary["git_fatal_class"] = "git_fatal_other"
+    return summary
+
+
 def error_summary(error):
-    # No exception text, command, stderr, source operands, or environment values.
+    # No exception text, command, raw stderr, source operands, or environment
+    # values; captured Git stderr is only classified into fixed labels.
     reasons = {
         "git output exceeds stamp bound": "git_output_bound",
         "unsupported revision format": "revision_format",
@@ -72,7 +110,7 @@ def error_summary(error):
     if isinstance(error, subprocess.TimeoutExpired):
         return {"reason": "git_timeout"}
     if isinstance(error, subprocess.CalledProcessError):
-        return {"reason": "git_nonzero", "exit_code": error.returncode}
+        return git_fatal_summary(error)
     if isinstance(error, OSError):
         return {"reason": "os_error", "errno": error.errno}
     if isinstance(error, UnicodeError):

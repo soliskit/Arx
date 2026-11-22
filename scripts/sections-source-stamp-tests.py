@@ -96,11 +96,62 @@ class SourceStampTests(unittest.TestCase):
         for error in errors:
             self.assertNotIn(marker, json.dumps(self.module.error_summary(error)))
         self.assertEqual(self.module.error_summary(errors[0]),
-                         {"reason": "git_nonzero", "exit_code": 128})
+                         {"reason": "git_nonzero", "exit_code": 128,
+                          "git_fatal_class": "git_stderr_unavailable"})
         self.assertEqual(self.module.error_summary(errors[1]), {"reason": "git_timeout"})
         self.assertEqual(self.module.error_summary(errors[2]), {"reason": "os_error", "errno": 13})
         with mock.patch("builtins.print", side_effect=BrokenPipeError):
             self.module.emit_observation({"kind": "fixture"})
+
+    def test_git_fatal_classification_fixed_labels_and_order(self):
+        marker = "sensitive-fixture-payload"
+        cases = [
+            (b"fatal: detected dubious ownership in repository at '" + marker.encode() + b"'\n",
+             "git_dubious_ownership"),
+            (b"fatal: unsafe repository ('" + marker.encode() + b"' is owned by someone else)\n",
+             "git_dubious_ownership"),
+            (b"fatal: unable to read config file '" + marker.encode() +
+             b"': Operation not permitted\n", "git_config_unreadable"),
+            (b"fatal: bad config file line 3 in file " + marker.encode() + b"\n",
+             "git_config_invalid"),
+            (b"fatal: not a git repository (or any of the parent directories): .git\n",
+             "git_not_a_repository"),
+            (b"fatal: cannot change to '" + marker.encode() + b"': Operation not permitted\n",
+             "git_cannot_chdir"),
+            (b"fatal: fixture operation failed: Operation not permitted\n",
+             "git_operation_not_permitted"),
+            (b"fatal: cannot open '" + marker.encode() + b"': Permission denied\n",
+             "git_permission_denied"),
+            (b"fatal: unable to access '" + marker.encode() + b"': fixture error\n",
+             "git_unable_to_access"),
+            (b"fatal: fixture failure without a known signature\n", "git_fatal_other"),
+        ]
+        for stderr, label in cases:
+            summary = self.module.error_summary(
+                subprocess.CalledProcessError(128, ["git"], stderr=stderr))
+            self.assertEqual(summary["reason"], "git_nonzero")
+            self.assertEqual(summary["exit_code"], 128)
+            self.assertEqual(summary["git_fatal_class"], label)
+            self.assertEqual(summary["git_stderr_length"], len(stderr))
+            self.assertNotIn(marker, json.dumps(summary))
+        empty = self.module.error_summary(subprocess.CalledProcessError(128, ["git"], stderr=b""))
+        self.assertEqual(empty["git_fatal_class"], "git_stderr_empty")
+        self.assertEqual(empty["git_stderr_length"], 0)
+        missing = self.module.error_summary(subprocess.CalledProcessError(128, ["git"]))
+        self.assertEqual(missing, {"reason": "git_nonzero", "exit_code": 128,
+                                   "git_fatal_class": "git_stderr_unavailable"})
+
+    def test_git_fatal_classification_bounded_scan(self):
+        beyond = b"x" * 5000 + b"not a git repository"
+        summary = self.module.error_summary(
+            subprocess.CalledProcessError(128, ["git"], stderr=beyond))
+        self.assertEqual(summary["git_fatal_class"], "git_fatal_other")
+        self.assertEqual(summary["git_stderr_length"], len(beyond))
+        within = b"not a git repository" + b"y" * 5000
+        summary = self.module.error_summary(
+            subprocess.CalledProcessError(128, ["git"], stderr=within))
+        self.assertEqual(summary["git_fatal_class"], "git_not_a_repository")
+        self.assertEqual(summary["git_stderr_length"], len(within))
 
     def test_dirty_generator_receipt_preserves_unavailable_attribution(self):
         (self.root / "source.txt").write_text("sensitive-fixture-content\n")
