@@ -1,0 +1,4 @@
+// Proposed opt-in Sections attribution build, not a permission change.
+ARX_SECTIONS_ATTRIBUTION = YES
+ARX_SECTIONS_ATTRIBUTION_GIT_INPUT = $(SRCROOT)/.git
+ARX_SECTIONS_ATTRIBUTION_INPUTS = $(SRCROOT)/scripts/sections-stamp-inputs.xcfilelist

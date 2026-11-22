@@ -94,6 +94,12 @@ nonisolated struct SectionsReply: Codable, Sendable {
   var errorCode: Int?
   var exceptionName: String?
   var stage: String?
+  var requestNonce: String?
+  var requestBound: Bool?
+  var sourceRevision: String?
+  var sourceManifest: String?
+  var buildBound: Bool?
+  var helperFileSHA256: String?
 }
 
 @MainActor @Observable final class SectionsExperimentModel {
@@ -239,6 +245,12 @@ nonisolated struct SectionsReply: Codable, Sendable {
       "Status: " + status,
       "Step: " + step,
       "Reason: " + reason,
+      "Request binding: " + (reply.requestBound == true ? "matched" : "not established"),
+      "Request ID: " + (reply.requestNonce ?? "unavailable"),
+      "Build source revision: " + (reply.sourceRevision ?? "unavailable"),
+      "Build source manifest: " + (reply.sourceManifest ?? "unavailable"),
+      "Build stamp binding: " + (reply.buildBound == true ? "matched" : "not established"),
+      "Observed helper file SHA256: " + (reply.helperFileSHA256 ?? "unavailable"),
     ]
     if let detail = reply.detail {
       lines.append("Permission: " + (Self.detailPhrases[detail] ?? "unrecognized status token"))
@@ -317,6 +329,10 @@ nonisolated struct SectionsReply: Codable, Sendable {
     case "worker_unavailable": "worker result unavailable; read unknown"
     case "spawn_unavailable": "worker launch unavailable; read unknown"
     case "input_unavailable": "worker input unavailable; read unknown"
+    case "request_binding_unverified": "worker request binding unverified; read unknown"
+    case "build_binding_unverified": "worker build binding unverified; read unknown"
+    case "helper_identity_unverified":
+      "worker file identity unverified" + interval + "; read unknown"
     case "spawn_failed": "worker launch failed; read unknown"
     case "pipe_setup_failed": "worker channel setup failed; read unknown"
     case "write_failed": "worker write failed; read unknown"
@@ -477,16 +493,71 @@ enum SectionsWorkerTransport {
     guard let executable = Bundle.main.url(forAuxiliaryExecutable: "ArxSectionsWorker") else {
       return SectionsReply(state: "unknown", reason: "spawn_unavailable")
     }
-    return call(executable: executable, arguments: [], action: action, fields: fields)
+    return callWithBuildContext(
+      executable: executable, action: action, fields: fields,
+      attributionEnabled: ARXSectionWorker.requiresAttribution(),
+      revision: ARXSectionWorker.sourceRevision(), manifest: ARXSectionWorker.sourceManifest())
+  }
+
+  // Exact production orchestration, separately callable with disposable child
+  // fixtures. No fixture uses the real app helper or a provider.
+  nonisolated static func callWithBuildContext(
+    executable: URL, action: String, fields: [String: String],
+    attributionEnabled: Bool, revision: String, manifest: String
+  ) -> SectionsReply {
+    // All admission hashing and the child exchange share the original budget.
+    let deadline = DispatchTime.now().uptimeNanoseconds + 10_000_000_000
+    let nonce = UUID().uuidString
+    if !attributionEnabled
+      || !SectionsBuildAttribution.lowercaseHex(revision, count: 40)
+      || !SectionsBuildAttribution.lowercaseHex(manifest, count: 64)
+    {
+      // Preserve the ordinary one-read route without imposing source-stamp or
+      // helper-file admission. It reports no established build attribution.
+      var ordinary = call(
+        executable: executable, arguments: [], action: action, fields: fields,
+        expectedNonce: nonce, deadline: deadline)
+      ordinary.requestNonce = nonce
+      return ordinary
+    }
+    var result = SectionsReply(state: "unknown", reason: "helper_identity_unverified")
+    do {
+      let beforeHash = try SectionsBuildAttribution.helperDigest(executable, deadline: deadline)
+      result = call(
+        executable: executable, arguments: [], action: action, fields: fields,
+        expectedNonce: nonce, expectedRevision: revision, expectedManifest: manifest,
+        deadline: deadline)
+      let afterHash = try SectionsBuildAttribution.helperDigest(executable, deadline: deadline)
+      guard beforeHash == afterHash else {
+        throw SectionsBuildAttribution.AttributionFailure.unverified
+      }
+      result.helperFileSHA256 = beforeHash
+    } catch {
+      result = SectionsReply(
+        state: "unknown", reason: "helper_identity_unverified", stage: result.stage)
+    }
+    // These values originate in the parent, never from decoded worker text.
+    result.requestNonce = nonce
+    result.sourceRevision = revision
+    result.sourceManifest = manifest
+    return result
   }
 
   // Synthetic tests substitute the child executable and arguments. The protocol,
   // 10-second deadline, output bound and exit-status rules below stay identical.
   nonisolated static func call(
-    executable: URL, arguments: [String], action: String, fields: [String: String]
+    executable: URL, arguments: [String], action: String, fields: [String: String],
+    expectedNonce: String? = nil, expectedRevision: String? = nil,
+    expectedManifest: String? = nil, deadline: UInt64? = nil
   ) -> SectionsReply {
     var input = fields
     input["action"] = action
+    if let expectedNonce {
+      guard UUID(uuidString: expectedNonce)?.uuidString == expectedNonce else {
+        return SectionsReply(state: "unknown", reason: "input_unavailable")
+      }
+      input["requestNonce"] = expectedNonce
+    }
     guard let bytes = try? JSONEncoder().encode(input), bytes.count <= 4096 else {
       return SectionsReply(state: "unknown", reason: "input_unavailable")
     }
@@ -518,7 +589,10 @@ enum SectionsWorkerTransport {
     // One deadline bounds everything that waits on the child: the input write,
     // the run and the output drain. Launch itself is a single spawn call that
     // refuses fast on a missing child. The worker enforces SIGALRM at entry.
-    let until = DispatchTime.now().uptimeNanoseconds + 10_000_000_000
+    let until = deadline ?? (DispatchTime.now().uptimeNanoseconds + 10_000_000_000)
+    guard DispatchTime.now().uptimeNanoseconds < until else {
+      return SectionsReply(state: "unknown", reason: "timeout")
+    }
     do {
       try process.run()
     } catch {
@@ -655,6 +729,26 @@ enum SectionsWorkerTransport {
     // the stream. A decoded reply always carries no stage; only the parent's
     // own transport-fate replies attach one, composed from validated markers.
     result.stage = nil
+    result.requestBound = nil
+    result.buildBound = nil
+    result.helperFileSHA256 = nil
+    if let expectedNonce {
+      guard result.requestNonce == expectedNonce else {
+        return SectionsReply(state: "unknown", reason: "request_binding_unverified")
+      }
+      result.requestBound = true
+    }
+    if let expectedRevision, let expectedManifest {
+      guard result.sourceRevision == expectedRevision, result.sourceManifest == expectedManifest
+      else {
+        return SectionsReply(state: "unknown", reason: "build_binding_unverified")
+      }
+      result.buildBound = true
+    }
+    result.sourceRevision = nil
+    result.sourceManifest = nil
+    // Never display or trust a worker-supplied binding verdict.
+    result.requestNonce = nil
     return result
   }
 }

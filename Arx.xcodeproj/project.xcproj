@@ -37,6 +37,16 @@
       "dependencies": [{ "kind": "package", "product-name": "BridgeCore" }, "ArxSectionsWorker"],
       "package-product-members": [{ "product-name": "BridgeCore", "build-phase": { "build-phase": "frameworks" } }],
       "build-phases": [
+        {
+          "kind": "script",
+          "name": "Generate Sections source stamp",
+          "shell": "/bin/sh",
+          "script": "/usr/bin/python3 \"$SRCROOT/scripts/sections-source-stamp.py\"",
+          "input-paths": [ "$(ARX_SECTIONS_ATTRIBUTION_GIT_INPUT)" ],
+          "input-file-list-paths": [ "$(ARX_SECTIONS_ATTRIBUTION_INPUTS)" ],
+          "output-paths": [ "$(DERIVED_FILE_DIR)/ArxSectionsBuildStamp.h" ],
+          "run-on-every-build": true,
+        },
         "compile-sources",
         "frameworks",
         "resources",
@@ -45,6 +55,7 @@
       "build-settings": {
         "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
         "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "AccentColor",
+        "HEADER_SEARCH_PATHS": [ "$(inherited)", "$(DERIVED_FILE_DIR)" ],
         "CODE_SIGN_STYLE": "Automatic",
         "COMBINE_HIDPI_IMAGES": "YES",
         "CURRENT_PROJECT_VERSION": "1",
@@ -83,12 +94,23 @@
       "product-type": "tool",
       "dependencies": [],
       "build-phases": [
+        {
+          "kind": "script",
+          "name": "Generate Sections source stamp",
+          "shell": "/bin/sh",
+          "script": "/usr/bin/python3 \"$SRCROOT/scripts/sections-source-stamp.py\"",
+          "input-paths": [ "$(ARX_SECTIONS_ATTRIBUTION_GIT_INPUT)" ],
+          "input-file-list-paths": [ "$(ARX_SECTIONS_ATTRIBUTION_INPUTS)" ],
+          "output-paths": [ "$(DERIVED_FILE_DIR)/ArxSectionsBuildStamp.h" ],
+          "run-on-every-build": true,
+        },
         "compile-sources",
         "frameworks",
       ],
       "build-settings": {
         "CODE_SIGN_ENTITLEMENTS": "SectionsWorkerTool/ArxSectionsWorker.entitlements",
         "CODE_SIGN_INJECT_BASE_ENTITLEMENTS": "NO",
+        "HEADER_SEARCH_PATHS": [ "$(inherited)", "$(DERIVED_FILE_DIR)" ],
         "CODE_SIGN_STYLE": "Automatic",
         "CURRENT_PROJECT_VERSION": "1",
         "DEVELOPMENT_TEAM": "CZ72YFTC2R",
@@ -166,6 +188,9 @@
     },
   ],
   "build-settings": {
+    "ARX_SECTIONS_ATTRIBUTION": "NO",
+    "ARX_SECTIONS_ATTRIBUTION_GIT_INPUT": "$(SRCROOT)/scripts/sections-source-stamp.py",
+    "ARX_SECTIONS_ATTRIBUTION_INPUTS": "$(SRCROOT)/scripts/sections-stamp-default-inputs.xcfilelist",
     "ALWAYS_SEARCH_USER_PATHS": "NO",
     "ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS": "YES",
     "CLANG_ANALYZER_NONNULL": "YES",

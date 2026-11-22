@@ -201,3 +201,44 @@ EventKit/provider paths. No hosted step invokes a real Sections provider.
 The portable C gates are inherited synthetic helpers; name/title Boolean helpers
 are not used by the native ExactReader. No successful fixture result establishes
 native membership, sandbox access or unsectioned semantics.
+
+
+## Proposed diagnostic attribution
+
+The app and embedded helper each compile a generated source stamp header.
+Ordinary builds default attribution off, need no Git metadata and emit empty
+stamp fields. Only an explicitly selected scripts/sections-attribution.xcconfig
+build attempts source attribution. Dirty/untracked source, symlinks or invalid
+snapshots emit empty fields rather than making ordinary compilation fail.
+Ordinary builds preserve the existing one-read route without build-stamp/hash
+admission, reporting build attribution unavailable. An opt-in build with unavailable/invalid metadata also preserves that nonce-bound
+route and reports build attribution unavailable. Only valid opt-in metadata adds
+exact stamp expectations and helper-file hash checks. A mismatch/hash failure in
+that attributed branch is a new fixed refusal, not established native capability.
+The opt-in build keeps the existing script sandbox; it does not disable it. It records the observed Git revision and a SHA256
+manifest over tracked path, mode and content hashes. This is a clean-source
+snapshot observation, not compiler attestation or proof of every actual input.
+The app compares its own compiled stamp with the helper's reply stamp and binds
+each production exchange with a parent-generated UUID. No nonce or source stamp
+grants permission. A missing or wrong echo is unknown, even if a decoded payload
+otherwise claims a matching section.
+
+The report's helper SHA256 identifies file bytes observed before and after the
+exchange, not the image executed by the kernel. Final-component symlinks and
+files over16MiB refuse. Chunk/time admission checks share the existing ten-second
+exchange budget; they do not cancel a blocked read. Stamp/hash failures preserve
+an unknown result and do not retry, change signing or broaden scope. These
+observations do not eliminate a launch time-of-check/time-of-use race.
+
+The five source-stamp Python methods and six new Swift transport/hash methods
+are synthetic proposals, not executed proof. Build phase ordering, generated
+header discovery and imported Objective-C stamp methods need actual authorized
+hosted validation before any native-use proposal. No native attempt is released
+by this documentation. The one-reminder/list-bound plan above remains unchanged.
+
+The proposed existing sections-local-proof workflow route compiles the opt-in
+configuration, checks the two generated source-stamp headers against HEAD, then
+reuses the same derived build directory for an ordinary build with one disposable
+untracked file and verifies empty, nonrequired metadata. It never launches the
+app/helper and removes only its own fixture file on exit. Existing runner and
+ten-minute job timeout remain. This route is proposed source only, not a CI pass.

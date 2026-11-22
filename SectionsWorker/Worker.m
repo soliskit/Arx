@@ -2,6 +2,13 @@
 #import "ExactReader.h"
 #import "Diagnostic.h"
 #if !defined(ARX_SECTION_READER_FIXTURES)
+#import "ArxSectionsBuildStamp.h"
+#else
+#define ARX_SECTIONS_SOURCE_REVISION @"fixture"
+#define ARX_SECTIONS_SOURCE_MANIFEST @"fixture"
+#define ARX_SECTIONS_REQUIRES_ATTRIBUTION 0
+#endif
+#if !defined(ARX_SECTION_READER_FIXTURES)
 #import <EventKit/EventKit.h>
 #endif
 #include <signal.h>
@@ -40,7 +47,17 @@ static int writeData(NSData *data, int status) {
     }
     return status;
 }
+// This process handles one request, then exits. The nonce binds only that
+// exchange; it grants no permission and is not a source/build identity.
+static NSString *requestNonce;
 static int output(NSDictionary *result, int status) {
+    if (requestNonce) {
+        NSMutableDictionary *bound = [result mutableCopy];
+        bound[@"requestNonce"] = requestNonce;
+        bound[@"sourceRevision"] = ARX_SECTIONS_SOURCE_REVISION;
+        bound[@"sourceManifest"] = ARX_SECTIONS_SOURCE_MANIFEST;
+        result = bound;
+    }
     marker(@"reply.encode", NO);
     NSData *data = [NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingSortedKeys error:NULL];
     if (!data) return 70;
@@ -56,7 +73,10 @@ static int output(NSDictionary *result, int status) {
         // stream never carries a duplicate.
         if ([result[@"state"] isEqual:@"labels"]) {
             NSData *fallback = [NSJSONSerialization dataWithJSONObject:
-                @{ @"state": @"unknown", @"reason": @"labels_too_large" }
+                (requestNonce ? @{ @"state": @"unknown", @"reason": @"labels_too_large", @"requestNonce": requestNonce,
+                    @"sourceRevision": ARX_SECTIONS_SOURCE_REVISION,
+                    @"sourceManifest": ARX_SECTIONS_SOURCE_MANIFEST }
+                    : @{ @"state": @"unknown", @"reason": @"labels_too_large" })
                 options:NSJSONWritingSortedKeys error:NULL];
             return fallback ? writeData(fallback, 77) : 70;
         }
@@ -85,6 +105,9 @@ static NSString *permissionDetail(EKAuthorizationStatus status) {
 }
 #endif
 @implementation ARXSectionWorker
++ (NSString *)sourceRevision { return ARX_SECTIONS_SOURCE_REVISION; }
++ (NSString *)sourceManifest { return ARX_SECTIONS_SOURCE_MANIFEST; }
++ (BOOL)requiresAttribution { return ARX_SECTIONS_REQUIRES_ATTRIBUTION != 0; }
 + (int)run {
     signal(SIGALRM, deadline);
     alarm(10);
@@ -97,6 +120,13 @@ static NSString *permissionDetail(EKAuthorizationStatus status) {
             if (n < 0 || count == 0 || count > 4096) return 64;
             id input = [NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:bytes length:count] options:0 error:NULL];
             if (![input isKindOfClass:NSDictionary.class] || !text(input[@"action"])) return 64;
+            if (input[@"requestNonce"]) {
+                id candidate = input[@"requestNonce"];
+                if (![candidate isKindOfClass:NSString.class]) return 64;
+                NSUUID *nonce = [[NSUUID alloc] initWithUUIDString:candidate];
+                if (!nonce || ![nonce.UUIDString isEqual:candidate]) return 64;
+                requestNonce = [candidate copy];
+            }
             NSString *action = input[@"action"];
             if (![@[@"labels", @"locate", @"read"] containsObject:action]) return 64;
             if (![action isEqual:@"labels"]) {

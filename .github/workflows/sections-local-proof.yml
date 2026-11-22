@@ -27,3 +27,18 @@ jobs:
           ROOT=SectionsWorker
           xcrun clang -fobjc-arc -Wall -Wextra -Werror -DARX_SECTION_READER_FIXTURES=1 -I "$ROOT" -framework Foundation "$ROOT/Worker.m" experiments/sections-local/WorkerFixtureMain.m -o "$RUNNER_TEMP/local-worker-fixture"
           python3 experiments/sections-local/transport-fixtures.py "$RUNNER_TEMP/local-worker-fixture"
+      - name: Check source-stamp logic using disposable Git fixtures
+        run: python3 -I -B scripts/sections-source-stamp-tests.py
+      - name: Compile the opt-in attributed app and helper without launching either
+        run: |
+          set -euo pipefail
+          xcodebuild build -project Arx.xcodeproj -scheme Arx -configuration Debug -xcconfig scripts/sections-attribution.xcconfig -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO -derivedDataPath .build/sections-proof
+          python3 -I -B scripts/sections-verify-build-stamps.py attributed .build/sections-proof
+      - name: Compile the ordinary route with untracked source and no attribution admission
+        run: |
+          set -euo pipefail
+          test ! -e sections-attribution-dirty-fixture.txt
+          trap 'rm -f sections-attribution-dirty-fixture.txt' EXIT
+          printf '%s\n' 'disposable untracked build qualification fixture' > sections-attribution-dirty-fixture.txt
+          xcodebuild build -project Arx.xcodeproj -scheme Arx -configuration Debug -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO -derivedDataPath .build/sections-proof
+          python3 -I -B scripts/sections-verify-build-stamps.py ordinary .build/sections-proof

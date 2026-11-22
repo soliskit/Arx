@@ -615,4 +615,164 @@ struct SectionsWorkerTransportTests {
         == "worker timed out no stage marker received (checkpoint not reached or output lost); read unknown"
     )
   }
+
+  @Test func nonceEchoBindsOnlyTheExpectedRequest() async throws {
+    let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
+    let nonce = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"
+    let child = try makeChild(
+      """
+      cat >/dev/null
+      printf '%s' '{"state":"unknown","reason":"fixture_no_provider","requestNonce":"\(nonce)","requestBound":false}'
+      exit 69
+      """, into: artifacts)
+    let reply = await Task.detached {
+      SectionsWorkerTransport.call(
+        executable: child, arguments: [], action: "labels", fields: [:], expectedNonce: nonce)
+    }.value
+    #expect(reply.requestBound == true)
+    #expect(reply.requestNonce == nil)
+  }
+
+  @Test func missingOrDifferentNonceCannotClaimBinding() async throws {
+    let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
+    let nonce = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"
+    for echo in ["", ",\"requestNonce\":\"11111111-2222-4333-8444-555555555555\""] {
+      let child = try makeChild(
+        """
+        cat >/dev/null
+        printf '%s' '{"state":"section","reason":"exact_object_candidate","sectionMatched":true,"requestBound":true\(echo)}'
+        exit 0
+        """, into: artifacts)
+      let reply = await Task.detached {
+        SectionsWorkerTransport.call(
+          executable: child, arguments: [], action: "labels", fields: [:], expectedNonce: nonce)
+      }.value
+      #expect(reply.state == "unknown")
+      #expect(reply.reason == "request_binding_unverified")
+      #expect(reply.sectionMatched != true)
+      #expect(reply.requestBound != true)
+    }
+  }
+
+  @Test func compiledStampEchoMustMatchBothParentFields() async throws {
+    let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
+    let nonce = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"
+    let revision = String(repeating: "a", count: 40)
+    let manifest = String(repeating: "b", count: 64)
+    for mode in ["match", "revision", "manifest", "missing"] {
+      let wrong = mode != "match"
+      let observed = mode == "revision" ? String(repeating: "c", count: 40) : revision
+      let observedManifest = mode == "manifest" ? String(repeating: "d", count: 64) : manifest
+      let stampFields =
+        mode == "missing"
+        ? ""
+        : ",\"sourceRevision\":\"\(observed)\",\"sourceManifest\":\"\(observedManifest)\""
+      let child = try makeChild(
+        """
+        cat >/dev/null
+        printf '%s' '{"state":"unknown","reason":"fixture_no_provider","requestNonce":"\(nonce)","buildBound":true\(stampFields)}'
+        exit 69
+        """, into: artifacts)
+      let reply = await Task.detached {
+        SectionsWorkerTransport.call(
+          executable: child, arguments: [], action: "labels", fields: [:],
+          expectedNonce: nonce, expectedRevision: revision, expectedManifest: manifest)
+      }.value
+      #expect(reply.buildBound == (wrong ? nil : true))
+      #expect(reply.sourceRevision == nil)
+      #expect(reply.sourceManifest == nil)
+      if wrong { #expect(reply.reason == "build_binding_unverified") }
+    }
+  }
+
+  @Test func helperDigestRefusesExpiredBudgetAndSymlink() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("sections-hash-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("helper")
+    try Data("abc".utf8).write(to: file)
+    let deadline = DispatchTime.now().uptimeNanoseconds + 1_000_000_000
+    let digest = try SectionsBuildAttribution.helperDigest(file, deadline: deadline)
+    #expect(digest == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    #expect(throws: (any Error).self) {
+      _ = try SectionsBuildAttribution.helperDigest(file, deadline: 0)
+    }
+    let oversized = directory.appendingPathComponent("oversized")
+    FileManager.default.createFile(atPath: oversized.path, contents: nil)
+    let handle = try FileHandle(forWritingTo: oversized)
+    try handle.truncate(atOffset: 16 * 1024 * 1024 + 1)
+    try handle.close()
+    #expect(throws: (any Error).self) {
+      _ = try SectionsBuildAttribution.helperDigest(oversized, deadline: deadline)
+    }
+    let link = directory.appendingPathComponent("link")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: file)
+    #expect(throws: (any Error).self) {
+      _ = try SectionsBuildAttribution.helperDigest(link, deadline: deadline)
+    }
+  }
+
+  @Test func ordinaryAndUnstampedContextsUseTheRealNonceOnlyAssembly() async throws {
+    let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
+    let child = try makeChild(
+      """
+      /usr/bin/python3 -c 'import json,sys; r=json.load(sys.stdin); print(json.dumps({"state":"unknown","reason":"fixture_no_provider","requestNonce":r["requestNonce"],"buildBound":True}))'
+      exit 69
+      """, into: artifacts)
+    let link = child.deletingLastPathComponent().appendingPathComponent("helper-link")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: child)
+    for enabled in [false, true] {
+      let reply = await Task.detached {
+        SectionsWorkerTransport.callWithBuildContext(
+          executable: link, action: "labels", fields: [:],
+          attributionEnabled: enabled, revision: "", manifest: "")
+      }.value
+      // An accidentally imposed helper-hash admission would refuse this symlink.
+      #expect(reply.reason == "fixture_no_provider")
+      #expect(reply.requestBound == true)
+      #expect(reply.requestNonce != nil)
+      #expect(reply.buildBound == nil)
+      #expect(reply.sourceRevision == nil)
+      #expect(reply.sourceManifest == nil)
+      #expect(reply.helperFileSHA256 == nil)
+    }
+  }
+
+  @Test func attributedAssemblyDetectsChangedHelperFile() async throws {
+    let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
+    let revision = String(repeating: "a", count: 40)
+    let manifest = String(repeating: "b", count: 64)
+    for mutate in [false, true] {
+      let mutation = mutate ? "printf '#changed\\n' >> \"$0\"" : ":"
+      let child = try makeChild(
+        """
+        \(mutation)
+        /usr/bin/python3 -c 'import json,sys; r=json.load(sys.stdin); print(json.dumps({"state":"unknown","reason":"fixture_no_provider","requestNonce":r["requestNonce"],"sourceRevision":"\(revision)","sourceManifest":"\(manifest)"}))'
+        exit 69
+        """, into: artifacts)
+      let reply = await Task.detached {
+        SectionsWorkerTransport.callWithBuildContext(
+          executable: child, action: "labels", fields: [:],
+          attributionEnabled: true, revision: revision, manifest: manifest)
+      }.value
+      if mutate {
+        #expect(reply.reason == "helper_identity_unverified")
+        #expect(reply.buildBound != true)
+        #expect(reply.helperFileSHA256 == nil)
+      } else {
+        #expect(reply.reason == "fixture_no_provider")
+        #expect(reply.buildBound == true)
+        #expect(reply.helperFileSHA256?.count == 64)
+      }
+      #expect(reply.sourceRevision == revision)
+      #expect(reply.sourceManifest == manifest)
+    }
+  }
+
 }

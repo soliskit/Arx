@@ -5,5 +5,8 @@ NS_ASSUME_NONNULL_BEGIN
 // main, and the same-app --sections-local-worker dispatch kept for tests.
 @interface ARXSectionWorker : NSObject
 + (int)run;
++ (NSString *)sourceRevision;
++ (NSString *)sourceManifest;
++ (BOOL)requiresAttribution;
 @end
 NS_ASSUME_NONNULL_END

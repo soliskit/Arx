@@ -46,6 +46,16 @@ locate = {key: value for key, value in scope.items() if key not in ["reminderID"
 locate["action"] = "locate"
 result = check(json.dumps(locate).encode(), 69)
 assert result.stdout.startswith(expected_prefix), result.stdout
+# Optional on the wire for fixture compatibility; production parent requires it.
+nonce = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"
+for action in ["labels", "locate", "read"]:
+    request = {**scope, "action": action, "requestNonce": nonce}
+    result = check(json.dumps(request).encode(), 69)
+    reply = json.loads(result.stdout[len(expected_prefix):])
+    assert reply["requestNonce"] == nonce
+for invalid in [42, "", "not-a-uuid", nonce.lower()]:
+    result = check(json.dumps({**scope, "requestNonce": invalid}).encode(), 64)
+    assert result.stdout == INPUT_BEFORE
 started = time.monotonic()
 process = subprocess.Popen([binary], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 try:
