@@ -29,6 +29,12 @@ jobs:
           python3 experiments/sections-local/transport-fixtures.py "$RUNNER_TEMP/local-worker-fixture"
       - name: Check source-stamp logic using disposable Git fixtures
         run: python3 -I -B scripts/sections-source-stamp-tests.py
+      - name: Select Xcode 27.2 for app and helper compilation
+        run: |
+          if [ -d /Applications/Xcode_27.2.app ]; then
+            sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
+          fi
+          xcodebuild -version
       - name: Compile the opt-in attributed app and helper without launching either
         run: |
           set -euo pipefail
