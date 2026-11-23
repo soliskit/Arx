@@ -233,7 +233,10 @@ nonisolated struct SectionsReply: Codable, Sendable {
     message = "Experiment stopped. " + step + ": " + reason
     let status =
       reply.state == "section" && reply.sectionMatched == true
-      ? "candidate section matched" : "unknown or mismatch - stopped"
+      ? "candidate section matched"
+      : reply.state == "no_section"
+        ? "provider-reported not in a section"
+        : "unknown or mismatch - stopped"
     // Only this report may leave the Mac. The disposable test list/reminder
     // names, the expected section name and the binding-verified returned name
     // are included per the owner's approval; no unrelated names, unrelated
@@ -319,7 +322,12 @@ nonisolated struct SectionsReply: Codable, Sendable {
     case "membership_api_unavailable": "membership API unavailable"
     case "membership_unverified": "membership unverified"
     case "membership_nil_no_error": "membership unverified (no section and no error)"
+    case "membership_none_3009": "provider-reported no section (-3009)"
     case "membership_error": "membership unverified (lookup error)"
+    case "store_unavailable": "private store unavailable"
+    case "view_init_unavailable": "section view unavailable"
+    case "fetch_selector_unavailable": "membership lookup unavailable"
+    case "id_construction_unavailable": "membership identifier construction unavailable"
     case "membership_section_identity": "membership unverified (section identity)"
     case "membership_unnamed": "membership unverified (section unnamed)"
     case "section_name_mismatch": "expected section did not match"

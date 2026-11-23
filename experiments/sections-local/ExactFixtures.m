@@ -21,6 +21,7 @@
 @property(nonatomic, strong) id displayName;
 @property(nonatomic) BOOL throws;
 @property(nonatomic) BOOL returnsError;
+@property(nonatomic) BOOL returnsNoMembership;
 @property(nonatomic) NSUInteger calls;
 @property(nonatomic) NSUInteger backingReads;
 @property(nonatomic) BOOL staleBacking;
@@ -38,6 +39,7 @@
     if (self.mutateItem) [self.mutateItem setList:self.replacementList];
     if (self.throws) [NSException raise:@"PRIVATE-SENSITIVE" format:@"hidden secret"];
     if (self.returnsError) *error = [NSError errorWithDomain:@"PRIVATE-SENSITIVE" code:1 userInfo:nil];
+    if (self.returnsNoMembership) *error = [NSError errorWithDomain:@"com.apple.reminderkit" code:-3009 userInfo:nil];
     if (!identifier) return nil;
     return self.section;
 }
@@ -147,17 +149,29 @@ int main(void) {
         view.section = section;
         view.returnsError = YES; NSDictionary *errored = READ();
         expect([errored[@"state"] isEqual:@"unknown"] && [errored[@"reason"] isEqual:@"membership_error"] && [errored[@"errorDomain"] isEqual:@"other"] && [errored[@"errorCode"] isEqual:@1], "error never positive; site named, structured detail only"); view.returnsError = NO;
+        view.returnsNoMembership = YES; NSDictionary *noMembership = READ();
+        expect([noMembership[@"state"] isEqual:@"no_section"] && [noMembership[@"reason"] isEqual:@"membership_none_3009"],
+            "provider -3009 is a confirmed no-section; site named");
+        expect(noMembership.count == 2, "no-section carries state and reason only"); view.returnsNoMembership = NO;
         view.throws = YES; NSDictionary *failure = READ();
         expect([failure[@"reason"] isEqual:@"private_api_exception"] && failure.count == 3 && [failure[@"exceptionName"] isEqual:@"other"], "exception sanitized");
         expect(![[failure description] containsString:@"PRIVATE-SENSITIVE"], "no exception disclosure"); view.throws = NO;
         expect([READ()[@"state"] isEqual:@"section"], "fresh read recovers after exception");
         for (NSString *reason in @[@"denied", @"identity_unverified", @"membership_unverified", @"membership_nil_no_error",
-                                   @"membership_error", @"membership_section_identity", @"membership_unnamed", @"private_api_exception"]) {
+                                   @"membership_error", @"membership_section_identity",
+                                   @"membership_unnamed", @"private_api_exception", @"store_unavailable",
+                                   @"view_init_unavailable", @"fetch_selector_unavailable", @"id_construction_unavailable"]) {
             NSDictionary *r = ARXSectionDiagnostic(@{@"state": @"unknown", @"reason": reason, @"private": @"PRIVATE-SENSITIVE"});
             expect([r[@"reason"] isEqual:reason] && r.count == 3, "fixed refusal preserved");
             expect(![[r description] containsString:@"PRIVATE-SENSITIVE"], "diagnostic excludes private fields");
         }
         expect([ARXSectionDiagnostic(@{@"state": @"unknown", @"reason": @"unavailable"})[@"reason"] isEqual:@"membership_api_unavailable"], "API absence distinct");
+        NSDictionary *noneClean = ARXSectionDiagnostic(@{@"state": @"no_section", @"reason": @"membership_none_3009", @"private": @"PRIVATE-SENSITIVE"});
+        expect([noneClean[@"state"] isEqual:@"no_section"] && [noneClean[@"reason"] isEqual:@"membership_none_3009"] && noneClean.count == 3,
+            "no-section diagnostic preserved with fixed fields");
+        expect(![[noneClean description] containsString:@"PRIVATE-SENSITIVE"], "no-section excludes private fields");
+        expect([ARXSectionDiagnostic(@{@"state": @"no_section", @"reason": @"PRIVATE-SENSITIVE"})[@"reason"] isEqual:@"worker_unavailable"],
+            "untrusted no-section reason refused");
         expect([ARXSectionDiagnostic(@{@"state": @"section", @"sectionMatched": @NO})[@"reason"] isEqual:@"section_name_mismatch"], "mismatch distinct");
         expect([ARXSectionDiagnostic(positive)[@"sectionMatched"] isEqual:@YES], "positive preserved");
         expect(ARXSectionDiagnostic(positive).count == 5, "approved names preserved");

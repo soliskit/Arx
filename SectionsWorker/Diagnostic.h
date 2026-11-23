@@ -22,12 +22,20 @@ static inline NSDictionary *ARXSectionDiagnostic(NSDictionary *result) {
             return clean;
         }
         NSString *reason = result[@"reason"];
+        // Confirmed no-section positive: fixed fields only, never private text.
+        if ([result[@"state"] isEqual:@"no_section"] &&
+            [result[@"reason"] isEqual:@"membership_none_3009"]) {
+            return @{ @"state": @"no_section", @"reason": @"membership_none_3009",
+                @"sectionMatched": @NO };
+        }
         if ([result[@"state"] isEqual:@"unknown"] && [reason isKindOfClass:NSString.class]) {
             if ([reason isEqual:@"unavailable"]) reason = @"membership_api_unavailable";
             if ([@[@"denied", @"identity_unverified", @"identity_list_unverified",
                    @"identity_source_unverified", @"identity_title_unverified",
                    @"membership_api_unavailable", @"membership_unverified", @"membership_nil_no_error",
                    @"membership_error", @"membership_section_identity", @"membership_unnamed",
+                   @"store_unavailable", @"view_init_unavailable",
+                   @"fetch_selector_unavailable", @"id_construction_unavailable",
                    @"private_api_exception"] containsObject:reason]) {
                 NSMutableDictionary *clean =
                     [@{ @"state": @"unknown", @"reason": reason, @"sectionMatched": @NO } mutableCopy];

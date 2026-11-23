@@ -2,6 +2,7 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 #include "gates.h"
+#include <dlfcn.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -106,6 +107,46 @@ static id storeFor(id reminder) {
     return expected && [store isKindOfClass:expected] ? store : nil;
 #endif
 }
+// Working-reference route (apple-reminders-mcp Sections.swift): a FRESH
+// REMStore from the ReminderKit framework, never a store recovered from
+// EventKit internals. dlopen only when the class is not already loaded.
+static id freshStore(void) {
+#if defined(ARX_SECTION_READER_FIXTURES)
+    return nil;
+#else
+    if (!NSClassFromString(@"REMStore"))
+        dlopen("/System/Library/PrivateFrameworks/ReminderKit.framework/ReminderKit", RTLD_LAZY);
+    Class cls = NSClassFromString(@"REMStore");
+    id allocated = cls ? [cls alloc] : nil;
+    if (!objectMethod(allocated, @"init", 0, NO)) return nil;
+    return [allocated init];
+#endif
+}
+// Working-reference route: construct a REMObjectID from the ALREADY VERIFIED
+// reminder UUID (bound to EventKit/private identity above) instead of passing
+// a private remObjectID object whose class/selector may have drifted.
+// itemID is the verified x-apple-reminderkit://REMCDReminder/<uuid> string.
+#if !defined(ARX_SECTION_READER_FIXTURES)
+static id constructedReminderID(NSString *itemID) {
+    NSString *prefix = @"x-apple-reminderkit://REMCDReminder/";
+    if (![itemID hasPrefix:prefix]) return nil;
+    NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:[itemID substringFromIndex:prefix.length]];
+    if (!uuid) return nil;
+    Class cls = NSClassFromString(@"REMObjectID");
+    SEL sel = NSSelectorFromString(@"objectIDWithUUID:entityName:");
+    if (!cls || ![cls respondsToSelector:sel]) return nil;
+    return ((id (*)(id, SEL, id, id))objc_msgSend)(cls, sel, uuid, @"REMCDReminder");
+}
+#endif
+static id fetchID(id item, NSString *itemID) {
+#if defined(ARX_SECTION_READER_FIXTURES)
+    (void)itemID;
+    return get(item, @"remObjectID");
+#else
+    (void)item;
+    return constructedReminderID(itemID);
+#endif
+}
 @interface NSObject (ARXExactViewInitializer)
 - (instancetype)initWithStore:(id)store;
 @end
@@ -149,28 +190,37 @@ static id storeFor(id reminder) {
         // and the single membership call. The after marker fires when the
         // call returns; it never proves the call completed a transaction.
         marker(@"membership.call", NO);
-        id store = storeFor(item);
-        if (!store) return unknown(@"unavailable");
+        id store = freshStore();
+        if (!store) store = storeFor(item);
+        if (!store) return unknown(@"store_unavailable");
         id view = nil;
 #if defined(ARX_SECTION_READER_FIXTURES)
         view = get(store, @"fixtureView");
 #else
         Class cls = NSClassFromString(@"REMListSectionsDataView");
         id allocated = cls ? [cls alloc] : nil;
-        if (!objectMethod(allocated, @"initWithStore:", 1, NO)) return unknown(@"unavailable");
+        if (!objectMethod(allocated, @"initWithStore:", 1, NO)) return unknown(@"view_init_unavailable");
         view = [allocated initWithStore:store];
 #endif
         NSString *selector = @"fetchListSectionWithReminderID:error:";
-        if (!objectMethod(view, selector, 2, YES)) return unknown(@"unavailable");
+        if (!objectMethod(view, selector, 2, YES)) return unknown(@"fetch_selector_unavailable");
+        id reminderObjectID = fetchID(item, itemID);
+        if (!reminderObjectID) return unknown(@"id_construction_unavailable");
         NSError *error = nil;
         id section = ((id (*)(id, SEL, id, NSError **))objc_msgSend)(
-            view, NSSelectorFromString(selector), get(item, @"remObjectID"), &error);
+            view, NSSelectorFromString(selector), reminderObjectID, &error);
         marker(@"membership.call", YES);
-        if (error || !section) {
-            if (!error) return unknown(@"membership_nil_no_error");
+        // Working-reference semantics, narrowed by the lane's reviewed
+        // discipline: an explicit provider -3009 (com.apple.reminderkit) is the
+        // definitive "in no section" answer, a POSITIVE state. Nil-without-error
+        // stays unknown ("nil never none"): absence of a signal is not a signal.
+        if (error) {
+            if ([error.domain isEqual:@"com.apple.reminderkit"] && error.code == -3009)
+                return @{ @"state": @"no_section", @"reason": @"membership_none_3009" };
             return @{ @"state": @"unknown", @"reason": @"membership_error",
                 @"errorDomain": domainToken(error.domain), @"errorCode": @(error.code) };
         }
+        if (!section) return unknown(@"membership_nil_no_error");
         if (backing(calendar, @"REMList") != list || backing(reminder, @"REMReminder") != item ||
             !exactText(identifier(get(item, @"list"), @"REMCDList"), listID) ||
             !exactText(identifier(get(item, @"account"), @"REMCDAccount"), accountID) ||

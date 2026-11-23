@@ -110,7 +110,9 @@ import Testing
       "existing_permission_unavailable", "label_bound_exceeded", "labels_unverified",
       "selection_unavailable", "selection_timeout", "selection_not_exactly_one",
       "identity_unverified", "private_framework_unavailable", "membership_api_unavailable",
-      "membership_unverified", "membership_nil_no_error", "membership_error",
+      "membership_unverified", "membership_nil_no_error", "membership_none_3009",
+      "membership_error", "store_unavailable", "view_init_unavailable",
+      "fetch_selector_unavailable", "id_construction_unavailable",
       "membership_section_identity", "membership_unnamed", "section_name_mismatch",
       "private_api_exception", "denied",
       "timeout", "worker_unavailable", "PRIVATE reminder name and ID",
@@ -157,19 +159,50 @@ import Testing
     #expect(SectionsExperimentModel.diagnosticReason("timeout").contains("read unknown"))
     #expect(SectionsExperimentModel.diagnosticReason("worker_unavailable").contains("read unknown"))
     let splitCodes = [
-      "membership_nil_no_error", "membership_error", "membership_section_identity",
-      "membership_unnamed",
+      "membership_nil_no_error", "membership_none_3009", "membership_error",
+      "membership_section_identity", "membership_unnamed", "store_unavailable",
+      "view_init_unavailable", "fetch_selector_unavailable", "id_construction_unavailable",
     ]
     let splitPhrases = splitCodes.map { SectionsExperimentModel.diagnosticReason($0) }
     // Each split site has its own mapped phrase, pairwise distinct, never the
     // unrecognized default; the legacy combined reason keeps its own mapping.
     #expect(splitPhrases.allSatisfy { !$0.contains("unrecognized") })
+    // The provider-signalled no-section outcome is a confirmed positive,
+    // never "unverified"; silent nil keeps its unverified mapping.
+    #expect(
+      !SectionsExperimentModel.diagnosticReason("membership_none_3009").contains("unverified"))
+    #expect(
+      SectionsExperimentModel.diagnosticReason("membership_nil_no_error").contains("unverified"))
     #expect(Set(splitPhrases).count == splitPhrases.count)
     #expect(
       !SectionsExperimentModel.diagnosticReason("membership_unverified").contains("unrecognized"))
     #expect(
       SectionsExperimentModel.diagnosticReason("section_name_mismatch")
         != SectionsExperimentModel.diagnosticReason("membership_unverified"))
+  }
+
+  @Test func providerReportedNoSectionStateMapsToHedgedStatus() {
+    // App-side fixture state coverage: a no_section state with the provider's
+    // -3009 signal is a positive outcome, but the status and reason stay
+    // provider-reported wording because native semantics are unproved.
+    let model = SectionsExperimentModel(
+      fixture: true,
+      fixtureReplies: ["read": SectionsReply(state: "no_section", reason: "membership_none_3009")])
+    model.selectedList = "fixture-list"
+    model.scratch = true
+    model.locate()
+    model.confirmed = true
+    model.expectedSection = "PRIVATE section"
+    model.run()
+    #expect(model.finished && !model.canRun && model.item == nil && model.lists.isEmpty)
+    #expect(model.report.contains("Status: provider-reported not in a section"))
+    #expect(
+      model.report.contains(
+        "Reason: " + SectionsExperimentModel.diagnosticReason("membership_none_3009")))
+    #expect(!model.report.contains("confirmed") && !model.message.contains("confirmed"))
+    #expect(!model.message.contains("PRIVATE"))
+    #expect(model.report.contains("Expected section: PRIVATE section"))
+    #expect(!model.report.contains("fixture-list") && !model.report.contains("fixture-source"))
   }
 
   @MainActor @Test func parentDisplayBoundaryReallowlistsWorkerFields() {
