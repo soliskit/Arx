@@ -6,6 +6,7 @@
 //  Reminders data, account or network permission is ever touched.
 //
 
+import AppKit
 import XCTest
 
 final class ArxUITests: XCTestCase {
@@ -59,6 +60,20 @@ final class ArxUITests: XCTestCase {
     app.launch()
     XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
     let application = app!
+    // Test-runner process facts, recorded as context for this audit run.
+    // These describe the XCTest runner process, not the app under test;
+    // they are a labeled context sample, not the audit engine's own state.
+    let runnerFacts = XCTAttachment(
+      string: """
+        test-runner process facts (not the app under test):
+        backingScaleFactor=\(NSScreen.main?.backingScaleFactor ?? 0)
+        increaseContrast=\(NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
+        reduceTransparency=\(NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency)
+        differentiateWithoutColor=\(NSWorkspace.shared.accessibilityDisplayShouldDifferentiateWithoutColor)
+        """
+    )
+    runnerFacts.lifetime = .keepAlways
+    add(runnerFacts)
     // Container observations come first and are recorded as data with no
     // assertions, so the observation step itself adds no abort before the
     // audit. The full strict audit then runs regardless of what the
@@ -2232,6 +2247,47 @@ final class ArxAuditMappingDiagnosticTests: XCTestCase {
     _ = try requireUniqueTarget(
       "calibration-black-on-white",
       label: "Calibration black-on-white control text",
+      in: application)
+    try runMappingAudit(on: application)
+  }
+
+  /// Diagnostic D: opaque-backed ablation. The same literal black
+  /// caption cell as diagnostic A, differing ONLY in the backing:
+  /// Color.white flattened with .compositingGroup(). Runs in the same
+  /// suite execution as diagnostic A; the comparison reads this run's two
+  /// diagnostic-issue logs together. Discrimination exists only if this
+  /// cell records zero findings while the standard control records
+  /// findings in the same suite run; both flagged is inconclusive (the
+  /// SwiftUI opacity/sample path is unproved). Neither outcome is a
+  /// pass/fail oracle for anything.
+  @MainActor
+  func testDiagnosticBlackOpaqueBackedMapping() throws {
+    let application = try launchDiagnostic(
+      argument: "--arx-calibration-black-opaque-backed",
+      artifactName: "diagnostic-black-opaque-backed-audit-window.png")
+    _ = try requireUniqueTarget(
+      "calibration-black-opaque-backed",
+      label: "Calibration black-on-white control text",
+      in: application)
+    try runMappingAudit(on: application)
+  }
+
+  /// Diagnostic E: standalone environment self-report. The cell renders
+  /// the app process's own effective appearance, accessibility display
+  /// flags and backing scale factor as literal text, recorded by the same
+  /// audit-time full-window capture and issue-handler channels. This is a
+  /// SEPARATE-RUN context sample: it is not contemporaneous app-state
+  /// proof for any control cell's audit run, and it must not be cited as
+  /// the audit engine's own state. Findings are recorded in full; neither
+  /// outcome is a pass/fail oracle.
+  @MainActor
+  func testDiagnosticEnvReportMapping() throws {
+    let application = try launchDiagnostic(
+      argument: "--arx-calibration-env-report",
+      artifactName: "diagnostic-env-report-audit-window.png")
+    _ = try requireUniqueTarget(
+      "calibration-env-report",
+      label: "Environment report (app process, separate run)",
       in: application)
     try runMappingAudit(on: application)
   }

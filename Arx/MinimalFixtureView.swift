@@ -386,6 +386,27 @@
       ProcessInfo.processInfo.arguments.contains("--arx-calibration-low-contrast")
     }
 
+    /// True only when a diagnostic test passes
+    /// --arx-calibration-black-opaque-backed: the same literal black
+    /// caption cell as calibration-black-on-white, differing ONLY in the
+    /// backing: Color.white flattened with .compositingGroup(). Text,
+    /// font, foreground and padding are unchanged. Discrimination exists
+    /// only if this cell passes while the standard control is flagged in
+    /// the same run; both flagged is inconclusive.
+    private var calibrationBlackOpaqueBackedRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-calibration-black-opaque-backed")
+    }
+
+    /// True only when a diagnostic test passes
+    /// --arx-calibration-env-report: a standalone environment self-report
+    /// cell, never co-mounted with any control. Records the app process's
+    /// own appearance and accessibility display flags as literal text at
+    /// audit time: a separate-run context sample, not contemporaneous
+    /// app-state proof for any other cell's audit run.
+    private var calibrationEnvReportRequested: Bool {
+      ProcessInfo.processInfo.arguments.contains("--arx-calibration-env-report")
+    }
+
     /// True only when a control test passes --arx-minimal-height-overflow:
     /// the texts cell content (title, status, revoke caption) plus a
     /// trailing clear filler taller than any window the screen can
@@ -727,6 +748,10 @@
         calibrationBlackNoBackgroundDetail
       } else if calibrationLowContrastRequested {
         calibrationLowContrastDetail
+      } else if calibrationBlackOpaqueBackedRequested {
+        calibrationBlackOpaqueBackedDetail
+      } else if calibrationEnvReportRequested {
+        calibrationEnvReportDetail
       } else {
         plainDetail
       }
@@ -902,6 +927,64 @@
           .padding(8)
           .background(Color.white)
           .accessibilityIdentifier("calibration-black-on-white")
+      }
+      .padding(24)
+      .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
+      .navigationTitle("Fixture Sharing")
+    }
+
+    /// Opaque-backed ablation cell: byte-identical text, font, foreground
+    /// and padding to calibration-black-on-white; the ONLY difference is
+    /// the backing, Color.white flattened with .compositingGroup(). A
+    /// bounded read: discrimination exists only if this cell passes while
+    /// the standard control is flagged in the same run; both flagged is
+    /// inconclusive.
+    @ViewBuilder private var calibrationBlackOpaqueBackedDetail: some View {
+      VStack(alignment: .leading, spacing: 0) {
+        Text("Calibration black-on-white control text")
+          .font(.caption)
+          .foregroundStyle(Color.black)
+          .padding(8)
+          .background(Color.white)
+          .compositingGroup()
+          .accessibilityIdentifier("calibration-black-opaque-backed")
+      }
+      .padding(24)
+      .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
+      .navigationTitle("Fixture Sharing")
+    }
+
+    /// Standalone environment self-report cell. Renders the app process's
+    /// own effective appearance and accessibility display flags as literal
+    /// text so the strict audit's existing audit-time full-window capture
+    /// records them as pixels. Mounted alone, so adding text here changes
+    /// no control cell's layout or audit findings. A separate-run context
+    /// sample: it is not contemporaneous app-state proof for any other
+    /// cell's audit run.
+    @ViewBuilder private var calibrationEnvReportDetail: some View {
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Environment report (app process, separate run)")
+          .font(.headline)
+          .accessibilityIdentifier("calibration-env-report")
+        Text("appearance: \(NSApplication.shared.effectiveAppearance.name.rawValue)")
+          .font(.caption)
+        Text(
+          "reduceTransparency: \(NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency)"
+        )
+        .font(.caption)
+        Text(
+          "increaseContrast: \(NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)"
+        )
+        .font(.caption)
+        Text(
+          "differentiateWithoutColor: "
+            + "\(NSWorkspace.shared.accessibilityDisplayShouldDifferentiateWithoutColor)"
+        )
+        .font(.caption)
+        Text(
+          "backingScaleFactor: \(NSApplication.shared.keyWindow?.screen?.backingScaleFactor ?? 0)"
+        )
+        .font(.caption)
       }
       .padding(24)
       .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
