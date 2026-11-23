@@ -234,7 +234,7 @@ static id fetchID(id item, NSString *itemID) {
             return unknown(@"membership_section_identity");
         NSString *expected = text(request[@"expectedSection"]);
         if (!expected) return unknown(@"identity_unverified");
-        NSString *actualName = text(get(section, @"displayName"));
+        NSString *actualName = text([section valueForKey:@"displayName"]);
         if (!actualName) return unknown(@"membership_unnamed");
         // Owner-approved disposable-scope capture: the expected and returned
         // names ride with the match boolean. The returned name is verified to
