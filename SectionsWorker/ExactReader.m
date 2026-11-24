@@ -232,11 +232,16 @@ static id fetchID(id item, NSString *itemID) {
         if (!sectionID || !exactText(identifier(sectionParent, @"REMCDList"), listID) ||
             !exactText(identifier(get(sectionParent, @"account"), @"REMCDAccount"), accountID))
             return unknown(@"membership_section_identity");
-        NSString *expected = text(request[@"expectedSection"]);
-        if (!expected) return unknown(@"identity_unverified");
         NSString *actualName = text([section valueForKey:@"displayName"]);
         if (!actualName) return unknown(@"membership_unnamed");
-        // Owner-approved disposable-scope capture: the expected and returned
+        NSString *expected = text(request[@"expectedSection"]);
+        if (!expected)
+            // Batch name-reporting mode: the identity and membership
+            // verification above is unchanged; the bounded plain-text name is
+            // returned without a match boolean or any expected value.
+            return @{ @"state": @"section", @"reason": @"exact_object_name",
+                @"actualSection": actualName };
+        // Disposable-scope capture: the expected and returned
         // names ride with the match boolean. The returned name is verified to
         // the selected list/account above but may be a pre-existing section.
         return @{ @"state": @"section", @"reason": @"exact_object_candidate",

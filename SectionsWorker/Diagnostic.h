@@ -3,6 +3,16 @@
 // Fixed final fields only. Unknown or malformed results cannot carry private text.
 static inline NSDictionary *ARXSectionDiagnostic(NSDictionary *result) {
     if ([result isKindOfClass:NSDictionary.class]) {
+        // Batch name-reporting result: bounded plain-text name, no match
+        // boolean, no expected value. Fixed fields only.
+        if ([result[@"state"] isEqual:@"section"] &&
+            [result[@"reason"] isEqual:@"exact_object_name"]) {
+            NSString *named = result[@"actualSection"];
+            if ([named isKindOfClass:NSString.class] && named.length > 0 && named.length <= 256)
+                return @{ @"state": @"section", @"reason": @"exact_object_name",
+                    @"actualSection": named };
+            return @{ @"state": @"unknown", @"reason": @"membership_unnamed" };
+        }
         if ([result[@"state"] isEqual:@"section"] &&
             [result[@"sectionMatched"] isKindOfClass:NSNumber.class]) {
             BOOL match = [result[@"sectionMatched"] isEqual:@YES];

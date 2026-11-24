@@ -65,12 +65,23 @@ static int output(NSDictionary *result, int status) {
     // so the result JSON is always the trailing blob of the stream.
     marker(@"reply.encode", YES);
     // Labels are local selection data only. Section-read output is fixed and tiny.
-    if (data.length > ([result[@"state"] isEqual:@"labels"] ? 16384u : 2048u)) {
+    unsigned budget = [result[@"state"] isEqual:@"labels"] ? 16384u :
+        ([result[@"state"] isEqual:@"sections"] ? 65536u : 2048u);
+    if (data.length > budget) {
         // A labels payload over the bound used to die here as a bare exit 70,
         // which the parent could only report as worker result unavailable.
         // Emit the fixed refusal instead so the stop names itself. The nested
         // refusal skips encode markers (already emitted above) so the marker
         // stream never carries a duplicate.
+        if ([result[@"state"] isEqual:@"sections"]) {
+            NSData *fallback = [NSJSONSerialization dataWithJSONObject:
+                (requestNonce ? @{ @"state": @"unknown", @"reason": @"sections_too_large", @"requestNonce": requestNonce,
+                    @"sourceRevision": ARX_SECTIONS_SOURCE_REVISION,
+                    @"sourceManifest": ARX_SECTIONS_SOURCE_MANIFEST }
+                    : @{ @"state": @"unknown", @"reason": @"sections_too_large" })
+                options:NSJSONWritingSortedKeys error:NULL];
+            return fallback ? writeData(fallback, 77) : 70;
+        }
         if ([result[@"state"] isEqual:@"labels"]) {
             NSData *fallback = [NSJSONSerialization dataWithJSONObject:
                 (requestNonce ? @{ @"state": @"unknown", @"reason": @"labels_too_large", @"requestNonce": requestNonce,
@@ -128,8 +139,18 @@ static NSString *permissionDetail(EKAuthorizationStatus status) {
                 requestNonce = [candidate copy];
             }
             NSString *action = input[@"action"];
-            if (![@[@"labels", @"locate", @"read"] containsObject:action]) return 64;
-            if (![action isEqual:@"labels"]) {
+            if (![@[@"labels", @"locate", @"read", @"sections"] containsObject:action]) return 64;
+            if ([action isEqual:@"sections"]) {
+                // Batch read of one list: server-resolved list identity only.
+                // Not a scratch action: no scratch confirmation and no fixed
+                // title gate; the bridge supplies IDs from its own store and
+                // client input never reaches this process.
+                if (!text(input[@"sourceID"]) || !text(input[@"listID"])) return 64;
+                // Batch reads can outlast the single-read deadline: the 8s
+                // enumeration bound plus per-reminder membership calls.
+                // Technical bound proposal; measured in qualification C3.
+                alarm(30);
+            } else if (![action isEqual:@"labels"]) {
                 if (!text(input[@"sourceID"]) || !text(input[@"listID"]) ||
                     ![input[@"scratchConfirmed"] isEqual:@"yes"]) return 64;
             }
@@ -170,6 +191,60 @@ static NSString *permissionDetail(EKAuthorizationStatus status) {
                 }
                 marker(@"labels.validate", YES);
                 return output(@{ @"state": @"labels", @"reason": @"local_selection_only", @"lists": rows }, 0);
+            }
+            if ([action isEqual:@"sections"]) {
+                marker(@"calendar.bind", NO);
+                EKCalendar *calendar = [store calendarWithIdentifier:input[@"listID"]];
+                marker(@"calendar.bind", YES);
+                if (!calendar || !text(calendar.calendarIdentifier) ||
+                    ![calendar.calendarIdentifier isEqual:input[@"listID"]])
+                    return refused(@"identity_list_unverified");
+                if (!text(calendar.source.sourceIdentifier) ||
+                    ![calendar.source.sourceIdentifier isEqual:input[@"sourceID"]])
+                    return refused(@"identity_source_unverified");
+                marker(@"sections.enumerate", NO);
+                NSPredicate *predicate = [store predicateForRemindersInCalendars:@[calendar]];
+                if (!predicate) return refused(@"selection_unavailable");
+                dispatch_semaphore_t done = dispatch_semaphore_create(0);
+                __block NSArray<EKReminder *> *rows = nil;
+                [store fetchRemindersMatchingPredicate:predicate completion:^(NSArray<EKReminder *> *found) {
+                    rows = found;
+                    dispatch_semaphore_signal(done);
+                }];
+                BOOL timedOut = dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC)) != 0;
+                marker(@"sections.enumerate", YES);
+                if (timedOut) return refused(@"selection_timeout");
+                // Whole-list bound: page via the bridge instead of relaxing.
+                if (rows.count > 200) return refused(@"sections_bound_exceeded");
+                marker(@"framework.load", NO);
+                NSBundle *kit = [NSBundle bundleWithPath:@"/System/Library/PrivateFrameworks/ReminderKit.framework"];
+                BOOL loaded = [kit load];
+                marker(@"framework.load", YES);
+                if (!loaded) return refused(@"private_framework_unavailable");
+                // Per-reminder failure degrades to that reminder's Unknown;
+                // the batch itself never reports a section it did not verify.
+                marker(@"sections.read", NO);
+                NSMutableArray *results = [NSMutableArray new];
+                ARXExactSectionReader *reader = [ARXExactSectionReader new];
+                for (EKReminder *reminder in rows) {
+                    NSString *rid = reminder.calendarItemIdentifier;
+                    if (!text(rid)) {
+                        [results addObject:@{ @"state": @"unknown", @"reason": @"identity_unverified" }];
+                        continue;
+                    }
+                    NSDictionary *request = @{ @"sourceID": input[@"sourceID"],
+                        @"listID": input[@"listID"], @"reminderID": rid };
+                    NSDictionary *grant = @{ @"read": @YES, @"sourceID": input[@"sourceID"],
+                        @"listID": input[@"listID"], @"reminderID": rid };
+                    NSDictionary *result = [reader readRequest:request grant:grant
+                        calendar:calendar reminder:reminder];
+                    NSMutableDictionary *entry = [ARXSectionDiagnostic(result) mutableCopy];
+                    entry[@"reminderID"] = rid;
+                    [results addObject:entry];
+                }
+                marker(@"sections.read", YES);
+                return output(@{ @"state": @"sections", @"reason": @"local_selection_only",
+                    @"results": results }, 0);
             }
             marker(@"calendar.bind", NO);
             EKCalendar *calendar = [store calendarWithIdentifier:input[@"listID"]];

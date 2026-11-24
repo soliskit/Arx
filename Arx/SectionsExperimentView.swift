@@ -15,7 +15,10 @@ struct SectionsExperimentView: View {
           Text("Fixture data only - no Reminders store or native provider").foregroundStyle(.orange)
         }
         Text("Sharing, browser pairing and the tunnel must stay off.")
-        Text("Read-only. Existing Reminders permission only. One section read, then stop.")
+        Text(
+          "Read-only. Existing Reminders permission only. "
+            + "The one-reminder read runs once; the batch read may repeat."
+        )
         Text(model.message).accessibilityIdentifier("sections-status")
         Button("Load account and list labels") { model.loadLabels() }
           .disabled(model.busy || model.finished)
@@ -27,7 +30,7 @@ struct SectionsExperimentView: View {
         }
         .disabled(model.busy || model.finished)
         Toggle(
-          "Arx Test A is disposable and contains only my one test reminder", isOn: $model.scratch
+          "Arx Test A is disposable and contains only my test reminders", isOn: $model.scratch
         )
         .disabled(model.busy || model.finished)
         Button("Locate the single test reminder") { model.locate() }
@@ -45,11 +48,17 @@ struct SectionsExperimentView: View {
         Button("Run one section read (10 seconds maximum)") { model.run() }
           .buttonStyle(.borderedProminent)
           .disabled(!model.canRun || model.busy || model.finished)
+        Button("Read every section label in Arx Test A (35 seconds maximum)") { model.runBatch() }
+          .disabled(!model.canBatch || model.busy || model.finished)
+        if !model.batchReport.isEmpty {
+          Text(model.batchReport).textSelection(.enabled).privacySensitive()
+            .accessibilityIdentifier("sections-batch-report")
+        }
         if model.finished {
           Text(
             model.fixture
               ? "Stopped. Synthetic fixture only: nothing was read from or created in Apple Reminders. Close this app."
-              : "Stopped. Do not retry this real read. Delete the temporary reminder and section in Apple Reminders, then close this app."
+              : "Stopped. Do not retry this real read. Delete the temporary reminders and sections in Apple Reminders, then close this app."
           )
           Text(model.report).textSelection(.enabled).accessibilityIdentifier("sections-report")
           Button("Copy sanitized result") {
@@ -78,6 +87,17 @@ nonisolated struct SectionsItem: Codable, Sendable {
   let title: String
 }
 
+// One batch name-reporting row: fixed fields only. reminderID is present only
+// when the worker verified that reminder's identity; actualSection only on a
+// verified name read. Every display use passes the same bounded re-allowlist
+// as the single-read fields.
+nonisolated struct SectionsEntry: Codable, Sendable {
+  let state: String
+  let reason: String
+  let reminderID: String?
+  let actualSection: String?
+}
+
 nonisolated struct SectionsReply: Codable, Sendable {
   var state: String
   var reason: String
@@ -89,6 +109,8 @@ nonisolated struct SectionsReply: Codable, Sendable {
   // marker lines, never accepted from the stream.
   var expectedSection: String?
   var actualSection: String?
+  // Batch rows for action "sections"; nil on single-read and labels replies.
+  var results: [SectionsEntry]?
   var detail: String?
   var errorDomain: String?
   var errorCode: Int?
@@ -113,6 +135,7 @@ nonisolated struct SectionsReply: Codable, Sendable {
   var finished = false
   var message = "No data read. Confirm the scratch setup before locating a reminder."
   var report = ""
+  var batchReport = ""
   let fixture: Bool
   private let fixtureReplies: [String: SectionsReply]
 
@@ -148,6 +171,15 @@ nonisolated struct SectionsReply: Codable, Sendable {
     canLocate && item != nil && confirmed
       && !expectedSection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       && expectedSection.utf8.count <= 256
+  }
+  // The batch read touches the same private list as the single read, so it
+  // requires the same disposability attestation plus the picker selection and
+  // a unique Arx Test A title. Identity is still the worker-resolved
+  // sourceID/listID pair from the labels reply, never typed in, and the
+  // worker re-verifies both before any read.
+  var canBatch: Bool {
+    scratch && list?.title == "Arx Test A"
+      && lists.filter { $0.title == "Arx Test A" }.count == 1
   }
 
   func clearSelection() {
@@ -198,6 +230,65 @@ nonisolated struct SectionsReply: Codable, Sendable {
     }
   }
 
+  // Unlike the single read this is repeatable: session qualification measures
+  // several timed runs and re-reads after moves made in Reminders. A failure
+  // still stops the whole experiment through stop().
+  func runBatch() {
+    guard canBatch, let list, !busy, !finished else { return }
+    perform(
+      action: "sections",
+      fields: ["sourceID": list.sourceID, "listID": list.id],
+      budgetSeconds: 35
+    ) { reply in
+      guard reply.state == "sections", let results = reply.results else {
+        self.stop(reply, action: "sections")
+        return
+      }
+      self.batchReport = Self.batchSummary(
+        results: results, listTitle: list.title, reply: reply)
+      self.message =
+        "Batch read finished. Move reminders between sections in Reminders, then read again."
+    }
+  }
+
+  // Grouping is by verified names only: every unreadable or unverified row
+  // lands in Unknown, never in a no-section bucket. Per-object rows echo the
+  // worker-verified reminderID so the owner can compare each object against
+  // Apple Reminders; aggregate counts alone could hide swapped names. Names
+  // and IDs pass the same bounded re-allowlist as every other worker-supplied
+  // display value.
+  static func batchSummary(
+    results: [SectionsEntry], listTitle: String, reply: SectionsReply
+  ) -> String {
+    var named: [String: Int] = [:]
+    var unknown = 0
+    var rows: [String] = []
+    for entry in results {
+      let id = boundedName(entry.reminderID) ?? "unverified reminder"
+      if entry.state == "section", entry.reason == "exact_object_name",
+        let name = boundedName(entry.actualSection)
+      {
+        named[name, default: 0] += 1
+        rows.append(id + ": section " + name)
+      } else {
+        unknown += 1
+        rows.append(id + ": Unknown (" + diagnosticReason(entry.reason) + ")")
+      }
+    }
+    var lines = [
+      "Batch read of " + listTitle + ": \(results.count) reminders",
+      "Request binding: " + (reply.requestBound == true ? "matched" : "not established"),
+      "Build stamp binding: " + (reply.buildBound == true ? "matched" : "not established"),
+    ]
+    for name in named.keys.sorted() {
+      lines.append(name + ": \(named[name] ?? 0)")
+    }
+    lines.append("Unknown: \(unknown)")
+    lines.append("Rows (compare each with Apple Reminders):")
+    lines.append(contentsOf: rows)
+    return lines.joined(separator: "\n")
+  }
+
   private static let detailPhrases = [
     "status_not_determined": "not determined",
     "status_restricted": "restricted",
@@ -229,7 +320,10 @@ nonisolated struct SectionsReply: Codable, Sendable {
     lists = []
     confirmed = false
     let reason = Self.diagnosticReason(reply.reason, stage: reply.stage)
-    let step = ["labels": "labels", "locate": "selection", "read": "read"][action] ?? "unknown"
+    let steps = [
+      "labels": "labels", "locate": "selection", "read": "read", "sections": "batch read",
+    ]
+    let step = steps[action] ?? "unknown"
     message = "Experiment stopped. " + step + ": " + reason
     let status =
       reply.state == "section" && reply.sectionMatched == true
@@ -348,6 +442,9 @@ nonisolated struct SectionsReply: Codable, Sendable {
     case "output_too_large": "reply too large; read unknown"
     case "output_undecodable": "reply not readable; read unknown"
     case "labels_too_large": "label names too large; read unknown"
+    case "sections_too_large": "section labels too large; read unknown"
+    case "sections_bound_exceeded": "list reminder limit exceeded; read unknown"
+    case "exact_object_name": "section label read"
     case "exact_object_candidate": "candidate section matched"
     case "fixture": "synthetic fixture"
     default: "unrecognized result; read unknown"
@@ -355,7 +452,7 @@ nonisolated struct SectionsReply: Codable, Sendable {
   }
 
   private func perform(
-    action: String, fields: [String: String],
+    action: String, fields: [String: String], budgetSeconds: UInt64 = 10,
     completion: @escaping @MainActor (SectionsReply) -> Void
   ) {
     busy = true
@@ -374,6 +471,18 @@ nonisolated struct SectionsReply: Codable, Sendable {
           SectionsReply(
             state: "item", reason: "fixture",
             item: SectionsItem(id: "fixture-item", title: "Disposable Sections check")))
+      case "sections":
+        completion(
+          SectionsReply(
+            state: "sections", reason: "fixture",
+            results: [
+              SectionsEntry(
+                state: "section", reason: "exact_object_name", reminderID: "fixture-item",
+                actualSection: "Fixture section"),
+              SectionsEntry(
+                state: "unknown", reason: "membership_unnamed", reminderID: nil,
+                actualSection: nil),
+            ]))
       default:
         completion(SectionsReply(state: "section", reason: "fixture", sectionMatched: true))
       }
@@ -381,7 +490,7 @@ nonisolated struct SectionsReply: Codable, Sendable {
     }
     Task {
       let reply = await Task.detached {
-        SectionsWorkerTransport.call(action: action, fields: fields)
+        SectionsWorkerTransport.call(action: action, fields: fields, budgetSeconds: budgetSeconds)
       }.value
       busy = false
       completion(reply)
@@ -402,6 +511,12 @@ enum SectionsWorkerTransport {
   nonisolated static let markerByteCap = 512
   nonisolated static let nonMarkerByteCap = 16384
   nonisolated static let aggregateByteCap = 16896
+  // The batch reply carries up to 64KB of fixed-shape rows plus its marker
+  // prefix; every other action keeps the original bounds.
+  nonisolated static func outputCaps(for action: String) -> (nonMarker: Int, aggregate: Int) {
+    action == "sections"
+      ? (65_536, 65_536 + markerByteCap + 64) : (nonMarkerByteCap, aggregateByteCap)
+  }
   // Zero validated markers is its own closed wording, stated as-is: the child
   // died before the first marker, or the marker output was lost. It is never
   // silently folded into the plain no-stage phrases.
@@ -420,6 +535,10 @@ enum SectionsWorkerTransport {
       "input.read", "permission.check", "store.create", "calendar.bind",
       "framework.load", "objects.bind", "membership.call", "reply.encode",
     ],
+    "sections": [
+      "input.read", "permission.check", "store.create", "calendar.bind",
+      "sections.enumerate", "framework.load", "sections.read", "reply.encode",
+    ],
   ]
   nonisolated static let stagePhrases: [String: String] = [
     "input.read": "input read",
@@ -435,6 +554,8 @@ enum SectionsWorkerTransport {
     "framework.load": "framework loading",
     "objects.bind": "object selection",
     "membership.call": "section lookup",
+    "sections.enumerate": "reminder enumeration",
+    "sections.read": "section reads",
   ]
 
   nonisolated struct MarkerSplit: Sendable {
@@ -450,6 +571,7 @@ enum SectionsWorkerTransport {
     var markers: [String] = []
     var markerBytes = 0
     var rest = output
+    let caps = outputCaps(for: action)
     // A line still open at 33+ bytes can never be a valid marker and stays in
     // the non-marker rest; a partial line at the end likewise stays behind.
     while let newline = rest.prefix(33).firstIndex(of: 0x0A) {
@@ -467,7 +589,7 @@ enum SectionsWorkerTransport {
       }
       rest = Data(rest.dropFirst(line.count))
     }
-    if rest.count > nonMarkerByteCap {
+    if rest.count > caps.nonMarker {
       return MarkerSplit(stage: nil, rest: output, overflow: true, malformed: false)
     }
     // The received lines must form an in-order subsequence of the expected
@@ -497,24 +619,30 @@ enum SectionsWorkerTransport {
     return MarkerSplit(stage: stage, rest: rest, overflow: false, malformed: false)
   }
 
-  nonisolated static func call(action: String, fields: [String: String]) -> SectionsReply {
+  nonisolated static func call(
+    action: String, fields: [String: String], budgetSeconds: UInt64 = 10
+  ) -> SectionsReply {
     guard let executable = Bundle.main.url(forAuxiliaryExecutable: "ArxSectionsWorker") else {
       return SectionsReply(state: "unknown", reason: "spawn_unavailable")
     }
     return callWithBuildContext(
       executable: executable, action: action, fields: fields,
       attributionEnabled: ARXSectionWorker.requiresAttribution(),
-      revision: ARXSectionWorker.sourceRevision(), manifest: ARXSectionWorker.sourceManifest())
+      revision: ARXSectionWorker.sourceRevision(), manifest: ARXSectionWorker.sourceManifest(),
+      budgetSeconds: budgetSeconds)
   }
 
   // Exact production orchestration, separately callable with disposable child
   // fixtures. No fixture uses the real app helper or a provider.
   nonisolated static func callWithBuildContext(
     executable: URL, action: String, fields: [String: String],
-    attributionEnabled: Bool, revision: String, manifest: String
+    attributionEnabled: Bool, revision: String, manifest: String,
+    budgetSeconds: UInt64 = 10
   ) -> SectionsReply {
-    // All admission hashing and the child exchange share the original budget.
-    let deadline = DispatchTime.now().uptimeNanoseconds + 10_000_000_000
+    // All admission hashing and the child exchange share one budget. Batch
+    // callers pass a budget above the worker's 30-second self-terminating
+    // alarm; every other caller keeps the original 10 seconds.
+    let deadline = DispatchTime.now().uptimeNanoseconds + budgetSeconds * 1_000_000_000
     let nonce = UUID().uuidString
     if !attributionEnabled
       || !SectionsBuildAttribution.lowercaseHex(revision, count: 40)
@@ -645,6 +773,7 @@ enum SectionsWorkerTransport {
     // the deadline; bytes past the aggregate bound are counted and discarded.
     // Each read rechecks the deadline, so even a continuously writing child
     // cannot hold the parent past it.
+    let caps = outputCaps(for: action)
     var output = Data()
     var total = 0
     var sawEOF = false
@@ -655,8 +784,8 @@ enum SectionsWorkerTransport {
         let count = chunk.withUnsafeMutableBytes { read(descriptor, $0.baseAddress, $0.count) }
         if count > 0 {
           total += count
-          if output.count < aggregateByteCap {
-            output.append(contentsOf: chunk.prefix(min(count, aggregateByteCap - output.count)))
+          if output.count < caps.aggregate {
+            output.append(contentsOf: chunk.prefix(min(count, caps.aggregate - output.count)))
           }
         } else if count == 0 {
           sawEOF = true
@@ -687,7 +816,7 @@ enum SectionsWorkerTransport {
     // can name the bounded interval it reached. Overflow and malformed marker
     // sequences fail closed here, after any needed kill.
     let split = splitMarkers(output, action: action)
-    if split.overflow || total > aggregateByteCap {
+    if split.overflow || total > caps.aggregate {
       if process.isRunning {
         kill(process.processIdentifier, SIGKILL)
         process.waitUntilExit()
