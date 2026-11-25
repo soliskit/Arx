@@ -517,11 +517,27 @@ enum SectionsWorkerTransport {
   nonisolated static let markerByteCap = 512
   nonisolated static let nonMarkerByteCap = 16384
   nonisolated static let aggregateByteCap = 16896
+  // The batch action also carries the per-reminder reader markers: four fixed
+  // lines (108 bytes) for each of at most 200 reminders, plus the outer lines.
+  // Only the batch action gets this larger marker bound.
+  nonisolated static let sectionsMarkerByteCap = 24_576
+  nonisolated static func markerCap(for action: String) -> Int {
+    action == "sections" ? sectionsMarkerByteCap : markerByteCap
+  }
+  // Reader markers the batch worker's reader emits for each reminder, inside
+  // the sections.read window. Within one reminder they come in this order, but
+  // a stream may lose lines or repeat a cycle, so the parser counts cycles
+  // rather than demanding one exact sequence.
+  nonisolated static let sectionsInnerStages = [
+    "objects.bind.before", "objects.bind.after",
+    "membership.call.before", "membership.call.after",
+  ]
+  nonisolated static let sectionsReminderBound = 200
   // The batch reply carries up to 64KB of fixed-shape rows plus its marker
   // prefix; every other action keeps the original bounds.
   nonisolated static func outputCaps(for action: String) -> (nonMarker: Int, aggregate: Int) {
     action == "sections"
-      ? (65_536, 65_536 + markerByteCap + 64) : (nonMarkerByteCap, aggregateByteCap)
+      ? (65_536, 65_536 + sectionsMarkerByteCap + 64) : (nonMarkerByteCap, aggregateByteCap)
   }
   // Zero validated markers is its own closed wording, stated as-is: the child
   // died before the first marker, or the marker output was lost. It is never
@@ -578,6 +594,8 @@ enum SectionsWorkerTransport {
     var markerBytes = 0
     var rest = output
     let caps = outputCaps(for: action)
+    let markerLimit = markerCap(for: action)
+    let inner = action == "sections" ? sectionsInnerStages : []
     // A line still open at 33+ bytes can never be a valid marker and stays in
     // the non-marker rest; a partial line at the end likewise stays behind.
     while let newline = rest.prefix(33).firstIndex(of: 0x0A) {
@@ -587,10 +605,10 @@ enum SectionsWorkerTransport {
         text.hasPrefix("stage="), text.hasSuffix("\n")
       else { break }
       let token = String(text.dropFirst(6).dropLast(1))
-      guard expected.contains(token) else { break }
+      guard expected.contains(token) || inner.contains(token) else { break }
       markers.append(token)
       markerBytes += line.count
-      if markerBytes > markerByteCap {
+      if markerBytes > markerLimit {
         return MarkerSplit(stage: nil, rest: output, overflow: true, malformed: false)
       }
       rest = Data(rest.dropFirst(line.count))
@@ -599,10 +617,39 @@ enum SectionsWorkerTransport {
       return MarkerSplit(stage: nil, rest: output, overflow: true, malformed: false)
     }
     // The received lines must form an in-order subsequence of the expected
-    // sequence: out-of-order, duplicate or unknown-position markers are
-    // malformed output, never silently absorbed.
+    // sequence for OUTER markers: out-of-order, duplicate or unknown-position
+    // outer markers are malformed output, never silently absorbed.
     var cursor = 0
+    var innerPosition = -1
+    var reminderCycles = 0
+    // Reader markers are loss-tolerant: a lost line must never turn a valid
+    // reply into a rejected one, and a present line never proves a read. A
+    // marker stream cannot tell a duplicate or backward line from the next
+    // reminder's cycle with lost lines, so the grammar takes the minimum-cycle
+    // reading: the first reader line starts a cycle, and any line whose position
+    // does not increase starts another one. The cycle count is bounded by the
+    // worker's own 200-reminder limit. The window closes by OUTER progress: any
+    // matched outer token after sections.read.before (including a lost
+    // sections.read.after's successors, reply.encode) makes later reader lines
+    // malformed. Every decoded identity and reply gate is unchanged.
+    let windowClose = expected.firstIndex(of: "sections.read.before") ?? -1
     for token in markers {
+      if let position = inner.firstIndex(of: token) {
+        guard cursor - 1 <= windowClose else {
+          return MarkerSplit(stage: nil, rest: output, overflow: false, malformed: true)
+        }
+        if position <= innerPosition || innerPosition < 0 {
+          reminderCycles += 1
+          guard reminderCycles <= sectionsReminderBound else {
+            return MarkerSplit(stage: nil, rest: output, overflow: false, malformed: true)
+          }
+        }
+        innerPosition = position
+        // A reader line proves the stream passed sections.read.before, so no
+        // earlier outer marker may follow it; the window stays open at that bound.
+        cursor = max(cursor, windowClose + 1)
+        continue
+      }
       guard let hit = expected[cursor...].firstIndex(of: token) else {
         return MarkerSplit(stage: nil, rest: output, overflow: false, malformed: true)
       }

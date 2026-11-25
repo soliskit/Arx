@@ -810,4 +810,251 @@ struct SectionsWorkerTransportTests {
     }
   }
 
+  // The batch worker's per-reminder reader emits four inner markers inside the
+  // sections.read window; a stream may lose lines or repeat a cycle. These fixtures
+  // reproduce that exact shape (the real
+  // native failure was 13 outer lines, 355 bytes, then objects.bind.before).
+  private static let sectionsOuterPrefix =
+    [
+      "input.read", "permission.check", "store.create", "calendar.bind", "sections.enumerate",
+      "framework.load",
+    ].flatMap { ["stage=\($0).before\n", "stage=\($0).after\n"] }
+    + ["stage=sections.read.before\n"]
+  private static let sectionsInner =
+    [
+      "stage=objects.bind.before\n", "stage=objects.bind.after\n",
+      "stage=membership.call.before\n", "stage=membership.call.after\n",
+    ]
+
+  private static func sectionsOutput(
+    reminders: Int, inner: [String]? = nil, closing: Bool = true, body: String = "{}"
+  ) -> Data {
+    var text = sectionsOuterPrefix.joined()
+    for _ in 0..<reminders { text += (inner ?? sectionsInner).joined() }
+    if closing {
+      text += "stage=sections.read.after\nstage=reply.encode.before\nstage=reply.encode.after\n"
+    }
+    return Data((text + body).utf8)
+  }
+
+  @Test func sectionsMarkerPrefixMatchesTheRealFailureShape() {
+    #expect(Self.sectionsOuterPrefix.joined().utf8.count == 355)
+    #expect(Self.sectionsInner.joined().utf8.count == 108)
+  }
+
+  @Test func sectionsInnerMarkersAreAcceptedForOneTwoAndTwoHundredReminders() {
+    for count in [0, 1, 2, 3, 200] {
+      let split = SectionsWorkerTransport.splitMarkers(
+        Self.sectionsOutput(reminders: count), action: "sections")
+      #expect(!split.malformed)
+      #expect(!split.overflow)
+      #expect(String(data: split.rest, encoding: .utf8) == "{}")
+    }
+  }
+
+  @Test func sectionsInnerMarkersStayWithinTheirWindowAndBound() {
+    // Two hundred and one reminders exceed the worker's own bound.
+    #expect(
+      SectionsWorkerTransport.splitMarkers(
+        Self.sectionsOutput(reminders: 201), action: "sections"
+      ).malformed)
+    // A reversed stream is the minimum-cycle reading (four cycles), not malformed.
+    let reversed = Array(Self.sectionsInner.reversed())
+    #expect(
+      !SectionsWorkerTransport.splitMarkers(
+        Self.sectionsOutput(reminders: 1, inner: reversed), action: "sections"
+      ).malformed)
+    // After the window has closed.
+    var late = Self.sectionsOutput(reminders: 0, body: "")
+    late.append(Data((Self.sectionsInner.joined() + "{}").utf8))
+    #expect(SectionsWorkerTransport.splitMarkers(late, action: "sections").malformed)
+  }
+
+  @Test func innerSectionsMarkersAreNotAcceptedForOtherActions() {
+    for action in ["labels", "locate"] {
+      let split = SectionsWorkerTransport.splitMarkers(
+        Data("stage=input.read.before\nstage=objects.bind.before\n{}".utf8), action: action)
+      #expect(String(data: split.rest, encoding: .utf8)?.hasPrefix("stage=objects") == true)
+    }
+  }
+
+  @Test func otherActionsKeepTheOriginalMarkerCap() {
+    #expect(SectionsWorkerTransport.markerCap(for: "labels") == 512)
+    #expect(SectionsWorkerTransport.markerCap(for: "read") == 512)
+    #expect(SectionsWorkerTransport.markerCap(for: "sections") == 24_576)
+    let overflow = Data(String(repeating: "stage=input.read.before\n", count: 30).utf8)
+    #expect(SectionsWorkerTransport.splitMarkers(overflow, action: "labels").overflow)
+  }
+
+  @Test func batchReplyWithInnerReaderMarkersDecodesEndToEnd() async throws {
+    let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("sections-inner-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    artifacts.paths.append(directory)
+    let markerFile = directory.appendingPathComponent("markers.txt")
+    try Self.sectionsOutput(reminders: 3, body: "").write(to: markerFile)
+    let child = try makeChild(
+      """
+      cat > /dev/null
+      cat '\(markerFile.path)'
+      printf '%s' '{"state":"unknown","reason":"fixture_no_provider"}'
+      exit 69
+      """, into: artifacts)
+    let reply = await call(child, action: "sections", fields: [:])
+    #expect(reply.reason == "fixture_no_provider")
+    #expect(reply.reason != "output_undecodable")
+  }
+
+  @Test func innerMarkersAfterTheReplyAreUndecodable() async throws {
+    let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("sections-noise-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    artifacts.paths.append(directory)
+    let markerFile = directory.appendingPathComponent("markers.txt")
+    try Self.sectionsOutput(reminders: 0, body: "").write(to: markerFile)
+    let child = try makeChild(
+      """
+      cat > /dev/null
+      cat '\(markerFile.path)'
+      printf '%s' '{"state":"unknown","reason":"fixture_no_provider"}'
+      printf 'stage=objects.bind.before\n'
+      exit 69
+      """, into: artifacts)
+    let reply = await call(child, action: "sections", fields: [:])
+    #expect(reply.reason == "output_undecodable")
+  }
+
+  // Flexible marker builder for window cases. `outer` marker groups are named
+  // so a case can drop one (a lost marker) without touching the others.
+  private static func sectionsLines(
+    readBefore: Bool = true, inner: [String], readAfter: Bool = true,
+    encode: Bool = true, afterEncode: [String] = [], body: String = "{}"
+  ) -> Data {
+    var text = Self.sectionsOuterPrefix.dropLast().joined()
+    if readBefore { text += "stage=sections.read.before\n" }
+    text += inner.joined()
+    if readAfter { text += "stage=sections.read.after\n" }
+    if encode { text += "stage=reply.encode.before\nstage=reply.encode.after\n" }
+    text += afterEncode.joined()
+    return Data((text + body).utf8)
+  }
+
+  private func isMalformed(_ data: Data) -> Bool {
+    SectionsWorkerTransport.splitMarkers(data, action: "sections").malformed
+  }
+
+  @Test func partialReaderCyclesRestartAndMixWithFullAndEmptyRows() {
+    let bind = Self.sectionsInner
+    let full = bind
+    let cases: [[String]] = [
+      [bind[0]] + full,
+      [bind[0], bind[1], bind[2]] + full,
+      [bind[0]] + full + [bind[0], bind[1], bind[2]] + full,
+      full + full + [bind[0]],
+    ]
+    for lines in cases {
+      let split = SectionsWorkerTransport.splitMarkers(
+        Self.sectionsLines(inner: lines), action: "sections")
+      #expect(!split.malformed)
+      #expect(!split.overflow)
+    }
+    // A row with no reader markers at all (identity unverified) is just absent.
+    #expect(!isMalformed(Self.sectionsLines(inner: full + full)))
+  }
+
+  @Test func duplicateAndBackwardReaderMarkersAreCountedAsCyclesAndBounded() {
+    // A stream cannot tell a duplicate or backward line from the next reminder's
+    // cycle with lost lines, so each is the minimum cycle reading, bounded at 200.
+    let bind = Self.sectionsInner
+    #expect(!isMalformed(Self.sectionsLines(inner: [bind[0], bind[1], bind[1]])))
+    #expect(!isMalformed(Self.sectionsLines(inner: [bind[2], bind[1]])))
+    #expect(!isMalformed(Self.sectionsLines(inner: [bind[0], bind[2], bind[1]])))
+    let duplicates = { (count: Int) in Array(repeating: bind[1], count: count) }
+    #expect(!isMalformed(Self.sectionsLines(inner: duplicates(200))))
+    #expect(isMalformed(Self.sectionsLines(inner: duplicates(201))))
+  }
+
+  @Test func readerMarkersAfterReplyEncodeAreMalformedEvenWithoutReadAfter() {
+    // sections.read.after lost: the later outer reply.encode lines close the window.
+    #expect(
+      isMalformed(
+        Self.sectionsLines(
+          inner: Self.sectionsInner, readAfter: false, afterEncode: [Self.sectionsInner[0]],
+          body: "")))
+    // And with read.after present.
+    #expect(
+      isMalformed(
+        Self.sectionsLines(inner: [], afterEncode: [Self.sectionsInner[0]], body: "")))
+  }
+
+  @Test func lostOuterMarkersStillAcceptReaderMarkersBeforeLaterOuterProgress() {
+    #expect(!isMalformed(Self.sectionsLines(readBefore: false, inner: Self.sectionsInner)))
+    #expect(
+      !isMalformed(
+        Self.sectionsLines(inner: Self.sectionsInner, readAfter: false, encode: false)))
+    #expect(
+      !isMalformed(
+        Self.sectionsLines(
+          readBefore: false, inner: Self.sectionsInner, readAfter: false, encode: false)))
+    // Reader lines with no outer marker before them (all lost) are not rejected by position.
+    let bare = Data((Self.sectionsInner.joined() + "{}").utf8)
+    #expect(!SectionsWorkerTransport.splitMarkers(bare, action: "sections").malformed)
+  }
+
+  @Test func readerLinesAdvanceTheOuterCursor() {
+    let outer = Self.sectionsOuterPrefix.dropLast().joined()
+    let inner = Self.sectionsInner[0]
+    // Reader line, then an earlier outer marker: malformed.
+    #expect(isMalformed(Data((outer + inner + "stage=framework.load.after\n{}").utf8)))
+    #expect(isMalformed(Data((outer + inner + "stage=sections.enumerate.after\n{}").utf8)))
+    // Earlier outer, reader, another earlier outer: malformed.
+    #expect(
+      isMalformed(
+        Data(("stage=input.read.before\n" + inner + "stage=permission.check.before\n{}").utf8)))
+    // Bare reader lines, then read.after and encode: accepted.
+    #expect(
+      !isMalformed(
+        Data(
+          (inner
+            + "stage=sections.read.after\nstage=reply.encode.before\nstage=reply.encode.after\n{}")
+            .utf8)))
+    #expect(
+      !isMalformed(
+        Data((inner + "stage=reply.encode.before\nstage=reply.encode.after\n{}").utf8)))
+  }
+
+  @Test func exactTwoHundredAreAcceptedAndMarkerCapOverflowsFirst() {
+    #expect(!isMalformed(Self.sectionsOutput(reminders: 200)))
+    #expect(isMalformed(Self.sectionsOutput(reminders: 201)))
+    let capped = SectionsWorkerTransport.splitMarkers(
+      Self.sectionsOutput(reminders: 230), action: "sections")
+    #expect(capped.overflow)
+  }
+
+  @Test func transportBodyBoundaryAtTwoHundredReminders() async throws {
+    for (size, tooLarge) in [(65_536, false), (65_537, true)] {
+      let artifacts = TempArtifacts()
+      defer { artifacts.removeAll() }
+      let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("sections-boundary-" + UUID().uuidString)
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      artifacts.paths.append(directory)
+      let markerFile = directory.appendingPathComponent("markers.txt")
+      try Self.sectionsOutput(reminders: 200, body: "").write(to: markerFile)
+      let child = try makeChild(
+        """
+        cat > /dev/null
+        cat '\(markerFile.path)'
+        /usr/bin/head -c \(size) /dev/zero | /usr/bin/tr '\\0' 'x'
+        exit 0
+        """, into: artifacts)
+      let reply = await call(child, action: "sections", fields: [:])
+      #expect((reply.reason == "output_too_large") == tooLarge)
+    }
+  }
+
 }
