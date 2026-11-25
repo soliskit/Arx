@@ -404,6 +404,22 @@ jobs:
           name: arx-safari-fixtures
           path: safari-evidence/
 
+  # Advisory: not a required check and not in slow-legs' needs.
+  ui-tests:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 27.2
+        run: |
+          if [ ! -d /Applications/Xcode_27.2.app ]; then
+            echo 'Xcode 27.2 is required but not present on this runner'
+            exit 1
+          fi
+          sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
+          xcodebuild -version
+      - name: Run the two fixture UI tests
+        run: xcodebuild test -project Arx.xcodeproj -scheme Arx -destination 'platform=macOS' -only-testing:ArxUITests/FixtureUITests/testFixtureBannerAndGrantControls -only-testing:ArxUITests/FixtureUITests/testGrantCheckboxToggles CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=27.0 -derivedDataPath .build-ui-tests
+
   # Merge gate for the gated leg: passes when the leg either ran green or was
   # legitimately skipped because its covered code did not change. A leg that
   # ran and failed or was cancelled, or a coverage gate that could not decide,

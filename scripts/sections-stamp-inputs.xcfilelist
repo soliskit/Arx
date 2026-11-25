@@ -41,6 +41,7 @@ $(SRCROOT)/ArxTests/EventKitPreservationTests.swift
 $(SRCROOT)/ArxTests/SectionsExperimentTests.swift
 $(SRCROOT)/ArxTests/SectionsWorkerTransportTests.swift
 $(SRCROOT)/ArxUITests/ArxUITests.swift
+$(SRCROOT)/ArxUITests/FixtureUITests.swift
 $(SRCROOT)/BridgeCore/BridgeServer.swift
 $(SRCROOT)/BridgeCore/FixtureStore.swift
 $(SRCROOT)/BridgeCore/Models.swift
