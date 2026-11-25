@@ -502,6 +502,41 @@ struct SectionsWorkerTransportTests {
     #expect(reply.reason == "output_undecodable")
   }
 
+  @Test func undecodableJSONReportsClosedTransportFacts() async throws {
+    let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
+    let child = try makeChild(
+      """
+      cat > /dev/null
+      printf 'stage=input.read.before\nstage=input.read.after\n'
+      printf '%s' 'PRIVATE not json'
+      exit 69
+      """, into: artifacts)
+    let reply = await call(child, action: "read", fields: Self.readFields)
+    #expect(reply.reason == "output_undecodable")
+    let transport = try #require(reply.transport)
+    #expect(transport.hasPrefix("path=json; bytes=63; body=16; exit=69; starts_with_brace=no"))
+    #expect(transport.contains("stage=after input read, before permission checking"))
+    #expect(!transport.contains("PRIVATE"))
+  }
+
+  @Test func malformedMarkersReportClosedTransportFacts() async throws {
+    let artifacts = TempArtifacts()
+    defer { artifacts.removeAll() }
+    let child = try makeChild(
+      """
+      cat > /dev/null
+      printf 'stage=input.read.after\nstage=input.read.before\n'
+      printf '%s' '{"state":"unknown","reason":"fixture_no_provider"}'
+      exit 69
+      """, into: artifacts)
+    let reply = await call(child, action: "read", fields: Self.readFields)
+    #expect(reply.reason == "output_undecodable")
+    let transport = try #require(reply.transport)
+    #expect(transport.hasPrefix("path=markers; bytes="))
+    #expect(!transport.contains("fixture_no_provider"))
+  }
+
   @Test func markerByteOverflowIsOutputTooLarge() async throws {
     let artifacts = TempArtifacts()
     defer { artifacts.removeAll() }

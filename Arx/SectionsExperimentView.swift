@@ -112,6 +112,9 @@ nonisolated struct SectionsReply: Codable, Sendable {
   // Batch rows for action "sections"; nil on single-read and labels replies.
   var results: [SectionsEntry]?
   var detail: String?
+  // Parent-composed, closed-format transport facts for an unreadable reply.
+  // Never accepted from the worker stream.
+  var transport: String?
   var errorDomain: String?
   var errorCode: Int?
   var exceptionName: String?
@@ -349,6 +352,9 @@ nonisolated struct SectionsReply: Codable, Sendable {
       "Build stamp binding: " + (reply.buildBound == true ? "matched" : "not established"),
       "Observed helper file SHA256: " + (reply.helperFileSHA256 ?? "unavailable"),
     ]
+    if let transport = reply.transport {
+      lines.append("Transport: " + transport)
+    }
     if let detail = reply.detail {
       lines.append("Permission: " + (Self.detailPhrases[detail] ?? "unrecognized status token"))
     }
@@ -619,6 +625,19 @@ enum SectionsWorkerTransport {
     return MarkerSplit(stage: stage, rest: rest, overflow: false, malformed: false)
   }
 
+  // Closed format only: fixed tokens and decimal counts computed by the parent.
+  // No byte of the worker's output is copied into the summary.
+  nonisolated static func transportSummary(
+    path: String, total: Int, body: Int, exitStatus: Int32? = nil,
+    startsWithBrace: Bool? = nil, stage: String? = nil
+  ) -> String {
+    var parts = ["path=" + path, "bytes=\(total)", "body=\(body)"]
+    if let exitStatus { parts.append("exit=\(exitStatus)") }
+    if let startsWithBrace { parts.append("starts_with_brace=" + (startsWithBrace ? "yes" : "no")) }
+    if let stage { parts.append("stage=" + stage) }
+    return parts.joined(separator: "; ")
+  }
+
   nonisolated static func call(
     action: String, fields: [String: String], budgetSeconds: UInt64 = 10
   ) -> SectionsReply {
@@ -828,7 +847,9 @@ enum SectionsWorkerTransport {
         kill(process.processIdentifier, SIGKILL)
         process.waitUntilExit()
       }
-      return SectionsReply(state: "unknown", reason: "output_undecodable")
+      return SectionsReply(
+        state: "unknown", reason: "output_undecodable",
+        transport: transportSummary(path: "markers", total: total, body: split.rest.count))
     }
     if process.isRunning {
       kill(process.processIdentifier, SIGKILL)
@@ -860,12 +881,18 @@ enum SectionsWorkerTransport {
         stage: split.stage ?? noMarkerStage)
     }
     guard var result = try? JSONDecoder().decode(SectionsReply.self, from: split.rest) else {
-      return SectionsReply(state: "unknown", reason: "output_undecodable")
+      return SectionsReply(
+        state: "unknown", reason: "output_undecodable",
+        transport: transportSummary(
+          path: "json", total: total, body: split.rest.count,
+          exitStatus: process.terminationStatus, startsWithBrace: split.rest.first == 0x7B,
+          stage: split.stage))
     }
     // The worker's JSON is untrusted: the interval stage is never accepted from
     // the stream. A decoded reply always carries no stage; only the parent's
     // own transport-fate replies attach one, composed from validated markers.
     result.stage = nil
+    result.transport = nil
     result.requestBound = nil
     result.buildBound = nil
     result.helperFileSHA256 = nil
