@@ -248,4 +248,88 @@ import Testing
     #expect(model.report.contains("Section matched: yes"))
   }
 
+  @Test func batchSummaryGroupsNamesAndSortsRows() {
+    let results = [
+      SectionsEntry(
+        state: "section", reason: "exact_object_name", reminderID: "b", actualSection: "Bravo"),
+      SectionsEntry(
+        state: "section", reason: "exact_object_name", reminderID: "a", actualSection: "Alpha"),
+      SectionsEntry(
+        state: "section", reason: "exact_object_name", reminderID: "c", actualSection: "Alpha"),
+      SectionsEntry(
+        state: "unknown", reason: "membership_unnamed", reminderID: nil, actualSection: nil),
+    ]
+    let text = SectionsExperimentModel.batchSummary(
+      results: results, listTitle: "Arx Test A",
+      reply: SectionsReply(state: "sections", reason: "ok"))
+    #expect(text.contains("4 reminders"))
+    let lines = text.components(separatedBy: "\n")
+    let alpha = lines.firstIndex(of: "Alpha: 2")
+    let bravo = lines.firstIndex(of: "Bravo: 1")
+    #expect(alpha != nil && bravo != nil && alpha! < bravo!)
+    #expect(lines.contains("Unknown: 1"))
+    let rows = lines.filter { $0.hasPrefix("a:") || $0.hasPrefix("b:") || $0.hasPrefix("c:") }
+    #expect(rows == ["a: section Alpha", "b: section Bravo", "c: section Alpha"])
+    #expect(text.contains("unverified reminder: Unknown ("))
+  }
+
+  @Test func batchSummaryNeverCountsNoSectionAsAName() {
+    let results = [
+      SectionsEntry(
+        state: "no_section", reason: "membership_none_3009", reminderID: "x", actualSection: nil)
+    ]
+    let text = SectionsExperimentModel.batchSummary(
+      results: results, listTitle: "Arx Test A",
+      reply: SectionsReply(state: "sections", reason: "ok"))
+    #expect(text.contains("Unknown: 1"))
+    #expect(text.contains("x: Unknown (provider-reported no section (-3009))"))
+    #expect(!text.contains("No section"))
+  }
+
+  @Test func batchSummaryOfEmptyListHasZeroCounts() {
+    let text = SectionsExperimentModel.batchSummary(
+      results: [], listTitle: "Arx Test A", reply: SectionsReply(state: "sections", reason: "ok"))
+    #expect(text.contains("0 reminders"))
+    #expect(text.contains("Unknown: 0"))
+  }
+
+  @Test func batchSummaryShowsFixedErrorDetailsOnly() {
+    let results = [
+      SectionsEntry(
+        state: "unknown", reason: "membership_error", reminderID: "r1", actualSection: nil,
+        errorDomain: "EKErrorDomain", errorCode: 5, exceptionName: "NSInvalidArgumentException"),
+      SectionsEntry(
+        state: "unknown", reason: "membership_error", reminderID: "r2", actualSection: nil,
+        errorDomain: "Forged\nDomain", errorCode: 7, exceptionName: "Made\nUp"),
+    ]
+    let text = SectionsExperimentModel.batchSummary(
+      results: results, listTitle: "Arx Test A",
+      reply: SectionsReply(state: "sections", reason: "ok"))
+    #expect(text.contains("[EventKit error code 5; NSInvalidArgumentException]"))
+    #expect(text.contains("[unrecognized error domain code 7; unrecognized exception type]"))
+    #expect(!text.contains("Forged") && !text.contains("Made"))
+  }
+
+  @MainActor @Test func stopClearsBatchReportAndNilFetchRefusalIsNamed() {
+    let model = SectionsExperimentModel(
+      fixture: true,
+      fixtureReplies: ["sections": SectionsReply(state: "unknown", reason: "selection_unavailable")]
+    )
+    model.selectedList = "fixture-list"
+    model.scratch = true
+    model.batchReport = "old result"
+    model.runBatch()
+    #expect(model.finished && model.batchReport.isEmpty)
+    #expect(model.message.contains("selection unavailable"))
+  }
+
+  @MainActor @Test func newBatchReadClearsOldReport() {
+    let model = SectionsExperimentModel(fixture: true)
+    model.selectedList = "fixture-list"
+    model.scratch = true
+    model.batchReport = "old result"
+    model.runBatch()
+    #expect(!model.batchReport.contains("old result"))
+    #expect(model.batchReport.contains("2 reminders"))
+  }
 }

@@ -58,7 +58,7 @@ struct SectionsExperimentView: View {
           Text(
             model.fixture
               ? "Stopped. Synthetic fixture only: nothing was read from or created in Apple Reminders. Close this app."
-              : "Stopped. Do not retry this real read. Delete the temporary reminders and sections in Apple Reminders, then close this app."
+              : "Stopped. Do not retry this real read. Leave the reminders and sections as they are until the result has been checked, then close this app."
           )
           Text(model.report).textSelection(.enabled).accessibilityIdentifier("sections-report")
           Button("Copy sanitized result") {
@@ -96,6 +96,9 @@ nonisolated struct SectionsEntry: Codable, Sendable {
   let reason: String
   let reminderID: String?
   let actualSection: String?
+  var errorDomain: String? = nil
+  var errorCode: Int? = nil
+  var exceptionName: String? = nil
 }
 
 nonisolated struct SectionsReply: Codable, Sendable {
@@ -238,6 +241,7 @@ nonisolated struct SectionsReply: Codable, Sendable {
   // still stops the whole experiment through stop().
   func runBatch() {
     guard canBatch, let list, !busy, !finished else { return }
+    batchReport = ""
     perform(
       action: "sections",
       fields: ["sourceID": list.sourceID, "listID": list.id],
@@ -265,17 +269,23 @@ nonisolated struct SectionsReply: Codable, Sendable {
   ) -> String {
     var named: [String: Int] = [:]
     var unknown = 0
-    var rows: [String] = []
+    var rows: [(id: String, text: String)] = []
     for entry in results {
       let id = boundedName(entry.reminderID) ?? "unverified reminder"
       if entry.state == "section", entry.reason == "exact_object_name",
         let name = boundedName(entry.actualSection)
       {
         named[name, default: 0] += 1
-        rows.append(id + ": section " + name)
+        rows.append((id, id + ": section " + name))
       } else {
         unknown += 1
-        rows.append(id + ": Unknown (" + diagnosticReason(entry.reason) + ")")
+        rows.append(
+          (
+            id,
+            id + ": Unknown (" + diagnosticReason(entry.reason) + ")"
+              + errorDetail(
+                domain: entry.errorDomain, code: entry.errorCode, exception: entry.exceptionName)
+          ))
       }
     }
     var lines = [
@@ -288,8 +298,26 @@ nonisolated struct SectionsReply: Codable, Sendable {
     }
     lines.append("Unknown: \(unknown)")
     lines.append("Rows (compare each with Apple Reminders):")
-    lines.append(contentsOf: rows)
+    lines.append(contentsOf: rows.sorted { ($0.id, $0.text) < ($1.id, $1.text) }.map(\.text))
     return lines.joined(separator: "\n")
+  }
+
+  // Fixed wording only; never echoes worker text.
+  static func errorDetail(domain: String?, code: Int?, exception: String?) -> String {
+    var parts: [String] = []
+    if let domain {
+      var phrase =
+        domain == "EKErrorDomain"
+        ? "EventKit error"
+        : domain == "NSCocoaErrorDomain" ? "Cocoa error" : "unrecognized error domain"
+      if let code { phrase += " code \(code)" }
+      parts.append(phrase)
+    }
+    if let exception {
+      parts.append(
+        allowedExceptionNames.contains(exception) ? exception : "unrecognized exception type")
+    }
+    return parts.isEmpty ? "" : " [" + parts.joined(separator: "; ") + "]"
   }
 
   private static let detailPhrases = [
@@ -319,6 +347,7 @@ nonisolated struct SectionsReply: Codable, Sendable {
     let knownItem = item
     let expected = expectedSection
     finished = true
+    batchReport = ""
     item = nil
     lists = []
     confirmed = false

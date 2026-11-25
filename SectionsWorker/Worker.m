@@ -214,6 +214,8 @@ static NSString *permissionDetail(EKAuthorizationStatus status) {
                 BOOL timedOut = dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC)) != 0;
                 marker(@"sections.enumerate", YES);
                 if (timedOut) return refused(@"selection_timeout");
+                // A nil fetch is a failed read, never an empty list.
+                if (rows == nil) return refused(@"selection_unavailable");
                 // Whole-list bound: page via the bridge instead of relaxing.
                 if (rows.count > 200) return refused(@"sections_bound_exceeded");
                 marker(@"framework.load", NO);
