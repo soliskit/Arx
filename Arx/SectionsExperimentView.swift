@@ -87,10 +87,10 @@ nonisolated struct SectionsItem: Codable, Sendable {
   let title: String
 }
 
-// One batch name-reporting row: fixed fields only. reminderID is present only
-// when the worker verified that reminder's identity; actualSection only on a
-// verified name read. Every display use passes the same bounded re-allowlist
-// as the single-read fields.
+// One batch name-reporting row: fixed fields only. The worker attaches
+// reminderID to every row it returns, including rows whose identity check
+// failed; actualSection is present only on a verified name read. Every display
+// use passes the same bounded re-allowlist as the single-read fields.
 nonisolated struct SectionsEntry: Codable, Sendable {
   let state: String
   let reason: String
@@ -144,6 +144,9 @@ nonisolated struct SectionsReply: Codable, Sendable {
   var batchReport = ""
   let fixture: Bool
   private let fixtureReplies: [String: SectionsReply]
+  // Fixture only: when true, a fixture read starts but never answers, so a test
+  // can look at the screen while a read is still running.
+  var fixtureWithholdsReply = false
 
   init(
     fixture: Bool = ProcessInfo.processInfo.arguments.contains("--sections-local-fixtures"),
@@ -191,6 +194,7 @@ nonisolated struct SectionsReply: Codable, Sendable {
   func clearSelection() {
     item = nil
     confirmed = false
+    batchReport = ""
   }
 
   func loadLabels() {
@@ -198,6 +202,7 @@ nonisolated struct SectionsReply: Codable, Sendable {
     perform(action: "labels", fields: [:]) { reply in
       self.lists = reply.lists ?? []
       self.selectedList = ""
+      self.batchReport = ""
       self.message =
         reply.state == "labels"
         ? "Select only the disposable Arx Test A list." : "Stopped: " + reply.reason
@@ -260,8 +265,10 @@ nonisolated struct SectionsReply: Codable, Sendable {
 
   // Grouping is by verified names only: every unreadable or unverified row
   // lands in Unknown, never in a no-section bucket. Per-object rows echo the
-  // worker-verified reminderID so the owner can compare each object against
-  // Apple Reminders; aggregate counts alone could hide swapped names. Names
+  // reminderID the worker attached (also on unverified rows) so the owner can
+  // compare each object against Apple Reminders; aggregate counts alone could
+  // hide swapped names. Count lines are prefixed so a section named "Unknown"
+  // cannot be mistaken for the unknown count. Names
   // and IDs pass the same bounded re-allowlist as every other worker-supplied
   // display value.
   static func batchSummary(
@@ -294,9 +301,9 @@ nonisolated struct SectionsReply: Codable, Sendable {
       "Build stamp binding: " + (reply.buildBound == true ? "matched" : "not established"),
     ]
     for name in named.keys.sorted() {
-      lines.append(name + ": \(named[name] ?? 0)")
+      lines.append("Section " + name + ": \(named[name] ?? 0)")
     }
-    lines.append("Unknown: \(unknown)")
+    lines.append("Unknown reminders: \(unknown)")
     lines.append("Rows (compare each with Apple Reminders):")
     lines.append(contentsOf: rows.sorted { ($0.id, $0.text) < ($1.id, $1.text) }.map(\.text))
     return lines.joined(separator: "\n")
@@ -387,11 +394,11 @@ nonisolated struct SectionsReply: Codable, Sendable {
     if let detail = reply.detail {
       lines.append("Permission: " + (Self.detailPhrases[detail] ?? "unrecognized status token"))
     }
-    if let knownList {
-      lines.append("Test list: " + knownList.title)
+    if let title = Self.boundedName(knownList?.title) {
+      lines.append("Test list: " + title)
     }
-    if let knownItem {
-      lines.append("Reminder: " + knownItem.title)
+    if let title = Self.boundedName(knownItem?.title) {
+      lines.append("Reminder: " + title)
     }
     if action == "read", let expectedName = Self.boundedName(expected) {
       lines.append("Expected section: " + expectedName)
@@ -493,6 +500,7 @@ nonisolated struct SectionsReply: Codable, Sendable {
     busy = true
     message = "Working locally. No sharing or network connection."
     if fixture {
+      if fixtureWithholdsReply { return }
       busy = false
       if let overridden = fixtureReplies[action] {
         completion(overridden)

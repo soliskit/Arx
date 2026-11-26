@@ -39,6 +39,13 @@ static NSDictionary *unknown(NSString *reason) {
 static NSString *text(id value) {
     return [value isKindOfClass:NSString.class] && [value length] > 0 && [value length] <= 256 ? value : nil;
 }
+// A section name is shown by the parent, which bounds it in UTF-8 bytes.
+// Measure it the same way here so the helper never accepts a name the parent
+// would reject.
+static NSString *nameText(id value) {
+    NSString *name = text(value);
+    return name && [name lengthOfBytesUsingEncoding:NSUTF8StringEncoding] <= 256 ? name : nil;
+}
 static BOOL objectMethod(id object, NSString *name, NSUInteger count, BOOL errorOut) {
     Method method = class_getInstanceMethod(object_getClass(object), NSSelectorFromString(name));
     if (!method || method_getNumberOfArguments(method) != count + 2) return NO;
@@ -232,7 +239,7 @@ static id fetchID(id item, NSString *itemID) {
         if (!sectionID || !exactText(identifier(sectionParent, @"REMCDList"), listID) ||
             !exactText(identifier(get(sectionParent, @"account"), @"REMCDAccount"), accountID))
             return unknown(@"membership_section_identity");
-        NSString *actualName = text([section valueForKey:@"displayName"]);
+        NSString *actualName = nameText([section valueForKey:@"displayName"]);
         if (!actualName) return unknown(@"membership_unnamed");
         NSString *expected = text(request[@"expectedSection"]);
         if (!expected)

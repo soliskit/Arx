@@ -143,8 +143,8 @@ static NSString *permissionDetail(EKAuthorizationStatus status) {
             if ([action isEqual:@"sections"]) {
                 // Batch read of one list: server-resolved list identity only.
                 // Not a scratch action: no scratch confirmation and no fixed
-                // title gate; the bridge supplies IDs from its own store and
-                // client input never reaches this process.
+                // title gate. The experiment screen supplies the IDs from the
+                // labels reply; there is no bridge in this experiment.
                 if (!text(input[@"sourceID"]) || !text(input[@"listID"])) return 64;
                 // Batch reads can outlast the single-read deadline: the 8s
                 // enumeration bound plus per-reminder membership calls.
@@ -273,6 +273,8 @@ static NSString *permissionDetail(EKAuthorizationStatus status) {
                 marker(@"reminders.fetch", YES);
                 if (timedOut) return refused(@"selection_timeout");
                 marker(@"row.check", NO);
+                // A nil fetch is a failed read. An empty array is zero rows.
+                if (rows == nil) return refused(@"selection_unavailable");
                 // Do not inspect or output ANY reminder's fields until the exact
                 // selected scratch list has exactly one object. Never fetch other lists.
                 if (rows.count != 1) return refused(@"selection_not_exactly_one");

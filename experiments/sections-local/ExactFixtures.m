@@ -142,6 +142,15 @@ int main(void) {
         expect([unnamed[@"state"] isEqual:@"unknown"] && [unnamed[@"reason"] isEqual:@"membership_unnamed"],
             "unnamed section never positive; site named");
         section.displayName = @"Scratch section";
+        // Section names are bounded in UTF-8 bytes, as the parent does: 150 two-byte
+        // characters (300 bytes) are refused, 128 of them (256 bytes) are accepted.
+        section.displayName = [@"" stringByPaddingToLength:150 withString:@"\u00e9" startingAtIndex:0];
+        NSDictionary *tooLong = READ();
+        expect([tooLong[@"state"] isEqual:@"unknown"] && [tooLong[@"reason"] isEqual:@"membership_unnamed"],
+            "section name over 256 UTF-8 bytes is refused as unnamed");
+        section.displayName = [@"" stringByPaddingToLength:128 withString:@"\u00e9" startingAtIndex:0];
+        expect([READ()[@"state"] isEqual:@"section"], "section name of exactly 256 UTF-8 bytes is accepted");
+        section.displayName = @"Scratch section";
         view.section = nil;
         NSDictionary *nilResult = READ();
         expect([nilResult[@"state"] isEqual:@"unknown"] && [nilResult[@"reason"] isEqual:@"membership_nil_no_error"],

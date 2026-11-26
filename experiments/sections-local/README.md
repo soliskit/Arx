@@ -68,7 +68,8 @@ membership deadline starts on Run, not during interactive setup. There are no
 worker retries. Input is limited to 4096 bytes;
 section-read output to 2048 bytes. The batch read is limited to a 64 KB reply
 and 24576 bytes of marker lines. Local account/list labels have a separate
-16384-byte/100-list bound and are never included in the copyable report. Timeout,
+16384-byte/100-list bound. The account title is never included in the copyable
+report; the disposable test list title is. Timeout,
 crash, permission refusal, mismatch, missing metadata or unknown ends the
 experiment. No fallback to another identity, API, privilege or list occurs.
 
@@ -109,7 +110,12 @@ The owner prepares only disposable objects in Apple Reminders:
    the disposable scope, unrelated names, raw worker output or unrelated
    screenshots. A match is candidate positive evidence on this machine/build,
    not proof of transaction isolation or shipping quality.
-7. Delete only the owner-created reminder and temporary section in Apple
+6b. The batch read lists every reminder in the disposable Arx Test A list with
+   its reminder ID and section name, grouped by section ("Section <name>: N"),
+   plus "Unknown reminders: N". A reminder whose section cannot be verified is
+   Unknown. IDs are shown for that list only. It is repeatable and a failure stops
+   the experiment.
+7. After the result is checked, delete only the owner-created reminder and temporary section in Apple
    Reminders, close the experiment, remove its launch argument and leave sharing
    and the tunnel stopped. The experiment PR closes unmerged.
 
@@ -122,8 +128,9 @@ This proof does not repeat CRUD, movement, completion, browser or layout tests.
 Exact EventKit source/list/reminder IDs come from local selection. The reader
 extracts each exact EventKit object's `backingObject._remObject`, checks private
 list/reminder entities, the reminder's parent and all account identities, and
-uses the store associated with that exact reminder. It does not construct a
-private UUID from an EventKit identifier or search by title. The list title is
+reads membership through a fresh ReminderKit store and builds the reminder's
+object ID from the verified reminder UUID, after the identity checks above. It
+does not search by title. The list title is
 only an additional scratch-scope restriction, not an identity mapping.
 
 The private membership selector is guarded by argument/return ABI metadata.
@@ -154,8 +161,8 @@ claims. Synthetic checks cannot establish which failure occurs on an owner's Mac
 
 This diagnostic revision has no authority to run a second local experiment.
 A separate owner decision is required before any further real step.
-Nil is unknown, never unsectioned. There is no native `none` result and no write
-or assignment path. Re-reading properties does not establish atomic freshness.
+Nil is unknown, never unsectioned. A provider -3009 reply is recorded as a row that
+reads Unknown, never as a section, and there is no write or assignment path. Re-reading properties does not establish atomic freshness.
 
 The exact-object backing route is secondary implementation evidence, not an
 Apple stability contract:
@@ -188,7 +195,7 @@ delivery, accepted and refused exit statuses, signal death, malformed and
 oversized output, launch failure, early stdin close, a large valid reply across
 pipe capacity, a descendant holding the output pipe, the 10-second parent
 deadline and single-launch behavior, the fixed marker protocol (a parametrized
-crash point after every marker position of every action plus the zero-marker
+crash point after every marker position of the labels, locate and read actions plus the zero-marker
 case, in-order subsequence validation, marker-byte and non-marker bounds,
 partial-line handling, decoded-stage clearing and parent re-allowlisting) plus
 one same-app fixture-worker smoke. Every fixture script, directory and counter
@@ -226,8 +233,8 @@ otherwise claims a matching section.
 
 The report's helper SHA256 identifies file bytes observed before and after the
 exchange, not the image executed by the kernel. Final-component symlinks and
-files over16MiB refuse. Chunk/time admission checks share the existing ten-second
-exchange budget; they do not cancel a blocked read. Stamp/hash failures preserve
+files over16MiB refuse. Chunk/time admission checks share the existing exchange
+budget (10 seconds for single reads, 35 for the batch read); they do not cancel a blocked read. Stamp/hash failures preserve
 an unknown result and do not retry, change signing or broaden scope. These
 observations do not eliminate a launch time-of-check/time-of-use race.
 
@@ -242,4 +249,4 @@ configuration, checks the two generated source-stamp headers against HEAD, then
 reuses the same derived build directory for an ordinary build with one disposable
 untracked file and verifies empty, nonrequired metadata. It never launches the
 app/helper and removes only its own fixture file on exit. Existing runner and
-ten-minute job timeout remain. This route is proposed source only, not a CI pass.
+ten-minute job timeout remain. This route runs as the foundation-fixtures job of sections-local-proof.yml.

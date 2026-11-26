@@ -81,7 +81,7 @@ import Testing
       fixture: true,
       fixtureReplies: [
         "read": SectionsReply(
-          state: "unknown", reason: "identity_or_membership_unverified", sectionMatched: false)
+          state: "unknown", reason: "identity_unverified", sectionMatched: false)
       ])
     model.selectedList = "fixture-list"
     model.scratch = true
@@ -264,10 +264,10 @@ import Testing
       reply: SectionsReply(state: "sections", reason: "ok"))
     #expect(text.contains("4 reminders"))
     let lines = text.components(separatedBy: "\n")
-    let alpha = lines.firstIndex(of: "Alpha: 2")
-    let bravo = lines.firstIndex(of: "Bravo: 1")
+    let alpha = lines.firstIndex(of: "Section Alpha: 2")
+    let bravo = lines.firstIndex(of: "Section Bravo: 1")
     #expect(alpha != nil && bravo != nil && alpha! < bravo!)
-    #expect(lines.contains("Unknown: 1"))
+    #expect(lines.contains("Unknown reminders: 1"))
     let rows = lines.filter { $0.hasPrefix("a:") || $0.hasPrefix("b:") || $0.hasPrefix("c:") }
     #expect(rows == ["a: section Alpha", "b: section Bravo", "c: section Alpha"])
     #expect(text.contains("unverified reminder: Unknown ("))
@@ -281,7 +281,7 @@ import Testing
     let text = SectionsExperimentModel.batchSummary(
       results: results, listTitle: "Arx Test A",
       reply: SectionsReply(state: "sections", reason: "ok"))
-    #expect(text.contains("Unknown: 1"))
+    #expect(text.contains("Unknown reminders: 1"))
     #expect(text.contains("x: Unknown (provider-reported no section (-3009))"))
     #expect(!text.contains("No section"))
   }
@@ -290,7 +290,7 @@ import Testing
     let text = SectionsExperimentModel.batchSummary(
       results: [], listTitle: "Arx Test A", reply: SectionsReply(state: "sections", reason: "ok"))
     #expect(text.contains("0 reminders"))
-    #expect(text.contains("Unknown: 0"))
+    #expect(text.contains("Unknown reminders: 0"))
   }
 
   @Test func batchSummaryShowsFixedErrorDetailsOnly() {
@@ -321,6 +321,58 @@ import Testing
     model.runBatch()
     #expect(model.finished && model.batchReport.isEmpty)
     #expect(model.message.contains("selection unavailable"))
+  }
+
+  @MainActor @Test func clearingTheSelectionClearsTheBatchReport() {
+    let model = SectionsExperimentModel(fixture: true)
+    model.batchReport = "old result"
+    model.clearSelection()
+    #expect(model.batchReport.isEmpty)
+  }
+
+  @MainActor @Test func loadingLabelsClearsTheBatchReport() {
+    let model = SectionsExperimentModel(fixture: true)
+    model.batchReport = "old result"
+    model.loadLabels()
+    #expect(model.batchReport.isEmpty)
+  }
+
+  @MainActor @Test func batchStopNamesTheBatchStep() {
+    let model = SectionsExperimentModel(
+      fixture: true,
+      fixtureReplies: ["sections": SectionsReply(state: "unknown", reason: "selection_unavailable")]
+    )
+    model.selectedList = "fixture-list"
+    model.scratch = true
+    model.runBatch()
+    #expect(model.message.hasPrefix("Experiment stopped. batch read: "))
+    #expect(model.report.contains("Step: batch read"))
+  }
+
+  @Test func sectionNamedUnknownIsNotTheUnknownCount() {
+    let results = [
+      SectionsEntry(
+        state: "section", reason: "exact_object_name", reminderID: "a", actualSection: "Unknown"),
+      SectionsEntry(
+        state: "unknown", reason: "membership_unnamed", reminderID: "b", actualSection: nil),
+    ]
+    let text = SectionsExperimentModel.batchSummary(
+      results: results, listTitle: "Arx Test A",
+      reply: SectionsReply(state: "sections", reason: "ok"))
+    let lines = text.components(separatedBy: "\n")
+    #expect(lines.contains("Section Unknown: 1"))
+    #expect(lines.contains("Unknown reminders: 1"))
+  }
+
+  @MainActor @Test func runBatchClearsTheOldReportBeforeTheReadFinishes() {
+    let model = SectionsExperimentModel(fixture: true)
+    model.selectedList = "fixture-list"
+    model.scratch = true
+    model.batchReport = "old result"
+    model.fixtureWithholdsReply = true
+    model.runBatch()
+    #expect(model.busy)
+    #expect(model.batchReport.isEmpty)
   }
 
   @MainActor @Test func newBatchReadClearsOldReport() {

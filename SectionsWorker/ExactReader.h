@@ -8,7 +8,8 @@ NS_ASSUME_NONNULL_BEGIN
 // Request/grant contain exact sourceID/listID/reminderID strings, read == YES.
 // Single-read requests also carry expectedSection and answer a match boolean,
 // never raw IDs. Batch requests omit it and answer the bounded verified name;
-// the caller attaches the worker-verified reminderID after diagnosis.
+// the caller attaches the reminderID to every row, including rows whose
+// identity check failed.
 // Native callers must resolve only these exact objects after authorization.
 // Fixtures use synthetic objects; no caller-supplied "verified" binding exists.
 - (NSDictionary *)readRequest:(NSDictionary *)request grant:(NSDictionary *)grant
