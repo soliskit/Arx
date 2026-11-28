@@ -6,6 +6,7 @@
 //  Tests wait on queue state events and a gate, never on sleeps.
 //
 
+import BridgeCore
 import Foundation
 import Testing
 
