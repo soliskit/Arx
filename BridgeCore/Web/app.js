@@ -7,7 +7,10 @@ let csrf = "",
   editing = null,
   busy = false,
   nextPage = null,
-  previousPage = null;
+  previousPage = null,
+  sections = {},
+  sectionFilter = { kind: "all" },
+  groupSections = false;
 const uncertainWrites = [];
 let editorText = {};
 const el = (id) => document.getElementById(id);
@@ -18,8 +21,16 @@ const text = (tag, value) => {
 };
 // Pure logic is served separately by /logic.js so node --test can run it
 // without a browser. index.html loads logic.js before this file.
-const { formatDate, formatTime, validSession, validateAdvancedJSON } =
-  globalThis.ArxLogic;
+const {
+  formatDate,
+  formatTime,
+  validSession,
+  validateAdvancedJSON,
+  sectionLabel,
+  sectionText,
+  sectionChoices,
+  arrangeBySection,
+} = globalThis.ArxLogic;
 function setStatus(value) {
   const warnings = uncertainWrites
     .map(
@@ -39,6 +50,9 @@ function clear() {
   rights = null;
   lists = [];
   rows = [];
+  sections = {};
+  sectionFilter = { kind: "all" };
+  groupSections = false;
   listID = "";
   editing = null;
   editorText = {};
@@ -435,18 +449,33 @@ async function mutate(action, item, extra, reload) {
       : "Change saved. Review the refreshed result.",
   );
 }
-async function load(cursor = {}, target = listID) {
-  const page = await api("/api/read", { listID: target, ...cursor });
-  // Switch lists only once the new list has actually loaded.
-  listID = target;
-  for (const button of el("lists").children) {
-    button.classList.toggle("selected", button.dataset.listId === listID);
+// Section controls and cards. Re-rendering after a filter change does not
+// fetch again, so the page position stays where it is.
+function syncSectionControls() {
+  const choices = sectionChoices(rows, sections);
+  const key = (c) => (c.kind === "named" ? `n:${c.name}` : "unknown");
+  if (
+    sectionFilter.kind !== "all" &&
+    !choices.some((c) => key(c) === key(sectionFilter))
+  ) {
+    sectionFilter = { kind: "all" };
   }
-  rows = page.items;
-  nextPage = page.next;
-  previousPage = page.previous;
-  el("pages").hidden = false;
-  pageControls();
+  const select = el("section-filter");
+  select.replaceChildren();
+  const all = text("option", "All sections");
+  all.value = "all";
+  select.append(all);
+  for (const c of choices) {
+    const option = text("option", c.kind === "named" ? c.name : "Unknown");
+    option.value = key(c);
+    select.append(option);
+  }
+  select.value = sectionFilter.kind === "all" ? "all" : key(sectionFilter);
+  el("group-sections").checked = groupSections;
+  el("section-tools").hidden = rows.length === 0;
+}
+function renderRows(reload) {
+  syncSectionControls();
   const editorWasOpen = !el("editor").hidden;
   el("editor").hidden = true;
   el("list-title").textContent =
@@ -465,90 +494,135 @@ async function load(cursor = {}, target = listID) {
       ),
     );
   }
-  for (const item of rows) {
-    const card = document.createElement("article");
-    card.className = "reminder";
-    card.append(
-      text("h3", (item.fields.completed ? "✓ " : "") + item.fields.title),
-    );
-    if (item.fields.notes) {
-      card.append(text("p", item.fields.notes));
+  const arranged = arrangeBySection(
+    rows,
+    sections,
+    sectionFilter,
+    groupSections,
+  );
+  if (rows.length && !arranged.some((g) => g.rows.length)) {
+    container.append(text("p", "No reminders on this page match the filter."));
+  }
+  for (const group of arranged) {
+    let parent = container;
+    if (groupSections) {
+      parent = document.createElement("section");
+      parent.className = "section-group";
+      parent.setAttribute("aria-label", `Section ${group.title}`);
+      parent.append(text("h3", group.title));
+      container.append(parent);
     }
-    if (item.fields.due) {
+    for (const item of group.rows) {
+      const card = document.createElement("article");
+      card.className = "reminder";
       card.append(
-        text(
-          "p",
-          `Due: ${formatDate(item.fields.due)}${item.fields.due.hour === undefined ? "" : ` ${formatTime(item.fields.due)}`}`,
-        ),
+        text("h3", (item.fields.completed ? "✓ " : "") + item.fields.title),
       );
-    }
-    const actions = document.createElement("div");
-    actions.className = "actions";
-    const button = (
-      label,
-      action,
-      danger = false,
-      name = label.toLowerCase(),
-    ) => {
-      const b = text("button", label);
-      b.type = "button";
-      b.disabled = busy;
-      b.className = danger ? "danger" : "";
-      b.setAttribute("aria-label", `${label} ${item.fields.title}`);
-      b.dataset.itemId = item.id;
-      b.dataset.action = name;
-      b.addEventListener("click", () => {
-        lastInvoker = b;
-        run(action);
-      });
-      actions.append(b);
-    };
-    const writable = lists.find((l) => l.id === listID)?.writable;
-    if (rights.manage && writable) {
-      button("Edit", () => openEditor(item));
-      button(
-        item.fields.completed ? "Reopen" : "Complete",
-        () =>
-          mutate(item.fields.completed ? "reopen" : "complete", item, {}, load),
-        false,
-        "complete",
+      const sectionLine = text(
+        "p",
+        `Section: ${sectionText(sectionLabel(sections, item.id))}`,
       );
-      const dest = document.createElement("select");
-      dest.setAttribute("aria-label", `Move ${item.fields.title} to list`);
-      for (const l of lists.filter(
-        (candidate) => candidate.id !== listID && candidate.writable,
-      )) {
-        const option = text("option", l.title);
-        option.value = l.id;
-        dest.append(option);
+      sectionLine.className = "section-name";
+      card.append(sectionLine);
+      if (item.fields.notes) {
+        card.append(text("p", item.fields.notes));
       }
-      if (dest.options.length) {
-        actions.append(dest);
-        button("Move", () =>
-          mutate("move", item, { destination: dest.value }, load),
+      if (item.fields.due) {
+        card.append(
+          text(
+            "p",
+            `Due: ${formatDate(item.fields.due)}${item.fields.due.hour === undefined ? "" : ` ${formatTime(item.fields.due)}`}`,
+          ),
         );
       }
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      const button = (
+        label,
+        action,
+        danger = false,
+        name = label.toLowerCase(),
+      ) => {
+        const b = text("button", label);
+        b.type = "button";
+        b.disabled = busy;
+        b.className = danger ? "danger" : "";
+        b.setAttribute("aria-label", `${label} ${item.fields.title}`);
+        b.dataset.itemId = item.id;
+        b.dataset.action = name;
+        b.addEventListener("click", () => {
+          lastInvoker = b;
+          run(action);
+        });
+        actions.append(b);
+      };
+      const writable = lists.find((l) => l.id === listID)?.writable;
+      if (rights.manage && writable) {
+        button("Edit", () => openEditor(item));
+        button(
+          item.fields.completed ? "Reopen" : "Complete",
+          () =>
+            mutate(
+              item.fields.completed ? "reopen" : "complete",
+              item,
+              {},
+              reload,
+            ),
+          false,
+          "complete",
+        );
+        const dest = document.createElement("select");
+        dest.setAttribute("aria-label", `Move ${item.fields.title} to list`);
+        for (const l of lists.filter(
+          (candidate) => candidate.id !== listID && candidate.writable,
+        )) {
+          const option = text("option", l.title);
+          option.value = l.id;
+          dest.append(option);
+        }
+        if (dest.options.length) {
+          actions.append(dest);
+          button("Move", () =>
+            mutate("move", item, { destination: dest.value }, reload),
+          );
+        }
+      }
+      if (rights.delete && writable) {
+        button(
+          "Delete",
+          async () => {
+            const confirmation = await confirmDelete(item);
+            if (confirmation !== null) {
+              await mutate("delete", item, { confirmation }, reload);
+            }
+          },
+          true,
+          "delete",
+        );
+      }
+      card.append(actions);
+      parent.append(card);
     }
-    if (rights.delete && writable) {
-      button(
-        "Delete",
-        async () => {
-          const confirmation = await confirmDelete(item);
-          if (confirmation !== null) {
-            await mutate("delete", item, { confirmation }, load);
-          }
-        },
-        true,
-        "delete",
-      );
-    }
-    card.append(actions);
-    container.append(card);
   }
   if (editorWasOpen || focusAfterRerender) {
     restoreEditorFocus();
   }
   focusAfterRerender = false;
+}
+async function load(cursor = {}, target = listID) {
+  const page = await api("/api/read", { listID: target, ...cursor });
+  // Switch lists only once the new list has actually loaded.
+  listID = target;
+  for (const button of el("lists").children) {
+    button.classList.toggle("selected", button.dataset.listId === listID);
+  }
+  rows = page.items;
+  sections = page.sections;
+  nextPage = page.next;
+  previousPage = page.previous;
+  el("pages").hidden = false;
+  pageControls();
+  renderRows(load);
 }
 async function refresh() {
   const state = await api("/api/session");
@@ -604,6 +678,24 @@ el("pair-form").addEventListener("submit", (event) => {
   });
 });
 el("refresh").addEventListener("click", () => run(refresh));
+function parseFilter(value) {
+  if (value === "all") {
+    return { kind: "all" };
+  }
+  if (value === "unknown") {
+    return { kind: "unknown" };
+  }
+  return { kind: "named", name: value.slice(2) };
+}
+el("section-filter").addEventListener("change", () => {
+  const value = el("section-filter").value;
+  sectionFilter = parseFilter(value);
+  renderRows(load);
+});
+el("group-sections").addEventListener("change", () => {
+  groupSections = el("group-sections").checked;
+  renderRows(load);
+});
 el("forget").addEventListener("click", () => {
   clear();
   setStatus(

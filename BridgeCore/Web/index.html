@@ -49,6 +49,21 @@
         <div id="lists" class="lists"></div>
         <h2 id="list-title">Choose a list</h2>
         <button id="new" type="button" hidden>New reminder</button>
+        <div id="section-tools" class="section-tools" hidden>
+          <label
+            >Section
+            <select id="section-filter">
+              <option value="all">All sections</option>
+            </select></label
+          ><label class="inline"
+            ><input id="group-sections" type="checkbox" /> Group by
+            section</label
+          >
+          <p class="hint">
+            Section names are read only. Unknown means Arx could not confirm the
+            section.
+          </p>
+        </div>
         <div id="reminders"></div>
         <nav id="pages" aria-label="Reminder pages" hidden>
           <button id="previous" type="button">Previous page</button

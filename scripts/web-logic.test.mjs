@@ -197,3 +197,78 @@ test("the page and server actually serve the tested logic file", () => {
     "app.js must use the served ArxLogic copy, not a private duplicate",
   );
 });
+
+test("section labels: names, unknown reasons and malformed input", () => {
+  const sections = {
+    a: { name: "Alpha" },
+    b: { unknownReason: "provider reported no section" },
+    c: { name: "Bravo", unknownReason: "both set" },
+    d: { name: "" },
+    e: "Alpha",
+  };
+  assert.deepEqual(
+    { ...ArxLogic.sectionLabel(sections, "a") },
+    { kind: "named", name: "Alpha" },
+  );
+  assert.equal(ArxLogic.sectionLabel(sections, "b").kind, "unknown");
+  assert.equal(
+    ArxLogic.sectionLabel(sections, "b").reason,
+    "provider reported no section",
+  );
+  for (const id of ["c", "d", "e", "missing", "toString", "__proto__"]) {
+    assert.equal(ArxLogic.sectionLabel(sections, id).kind, "unknown", id);
+  }
+  for (const bad of [undefined, null, [], "x", 3]) {
+    assert.equal(ArxLogic.sectionLabel(bad, "a").kind, "unknown");
+  }
+  assert.equal(
+    ArxLogic.sectionText(ArxLogic.sectionLabel(sections, "d")),
+    "Unknown",
+  );
+  assert.doesNotMatch(logicSource, /No section/i);
+});
+
+test("section choices and grouping keep Unknown separate and rows in order", () => {
+  const rows = ["r1", "r2", "r3", "r4", "r5"].map((id) => ({ id }));
+  const sections = {
+    r1: { name: "Bravo" },
+    r2: { name: "Alpha" },
+    r3: { unknownReason: "x" },
+    r4: { name: "Alpha" },
+  };
+  // The logic runs in a separate vm realm, so compare plain copies.
+  const plain = (value) => JSON.parse(JSON.stringify(value));
+  assert.deepEqual(
+    plain(ArxLogic.sectionChoices(rows, sections).map((c) => c.name ?? c.kind)),
+    ["Alpha", "Bravo", "unknown"],
+  );
+  const ids = (groups) =>
+    plain(groups.map((g) => [g.title, g.rows.map((r) => r.id)]));
+  assert.deepEqual(
+    ids(ArxLogic.arrangeBySection(rows, sections, { kind: "all" }, true)),
+    [
+      ["Alpha", ["r2", "r4"]],
+      ["Bravo", ["r1"]],
+      ["Unknown", ["r3", "r5"]],
+    ],
+  );
+  assert.deepEqual(
+    ids(ArxLogic.arrangeBySection(rows, sections, { kind: "all" }, false)),
+    [["", ["r1", "r2", "r3", "r4", "r5"]]],
+  );
+  assert.deepEqual(
+    ids(
+      ArxLogic.arrangeBySection(
+        rows,
+        sections,
+        { kind: "named", name: "Alpha" },
+        false,
+      ),
+    ),
+    [["", ["r2", "r4"]]],
+  );
+  assert.deepEqual(
+    ids(ArxLogic.arrangeBySection(rows, sections, { kind: "unknown" }, true)),
+    [["Unknown", ["r3", "r5"]]],
+  );
+});

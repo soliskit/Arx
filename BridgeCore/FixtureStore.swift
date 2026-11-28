@@ -19,6 +19,10 @@ import Foundation
     "book": .init(id: "book", listID: "inbox", fields: .init(title: "Return the library book")),
     "walk": .init(id: "walk", listID: "weekend", fields: .init(title: "Plan a walk")),
   ]
+  /// Fixture section labels by reminder id. Reminders without an entry read as Unknown.
+  public var sectionLabelsByID: [String: SectionLabel] = [:]
+  /// Number of section reads requested, for tests of the read bound.
+  public private(set) var sectionReadCount = 0
   public var beforeFetch: (@MainActor () async -> Void)?
   public init() {}
   public func lists() throws -> [ReminderList] {
@@ -29,6 +33,11 @@ import Foundation
     let snapshot = rows.values.filter { $0.listID == list }.map(\.id)
     await beforeFetch?()
     return snapshot
+  }
+  public func sectionLabels(in list: String, ids: [String]) async -> [String: SectionLabel] {
+    sectionReadCount += 1
+    let pairs = ids.map { ($0, sectionLabelsByID[$0] ?? .unavailable) }
+    return Dictionary(pairs, uniquingKeysWith: { first, _ in first })
   }
   public func current(_ id: String) throws -> SharedReminder {
     guard authorized, let item = rows[id] else { throw BridgeFailure.denied }

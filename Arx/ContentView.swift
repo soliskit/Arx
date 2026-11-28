@@ -44,7 +44,7 @@ struct ContentView: View {
           Button("Refresh lists") { model.refresh() }
         } else {
           Text(
-            "Apple grants full Reminders access. Arx shares only the lists and actions you select for each paired client."
+            "Apple grants full Reminders access. Arx shares only the lists and actions you select for each paired client. Clients that can read a list also see its section names."
           )
           Button("Connect Reminders") { Task { await model.connect() } }.buttonStyle(
             .borderedProminent)
@@ -58,6 +58,12 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 20) {
           Text("Arx bridge").font(.largeTitle)
           Text(model.message).accessibilityIdentifier("bridge-status")
+          Text(
+            model.fixture || SectionsReader.buildAttributed
+              ? SectionsReader.statusAttributed : SectionsReader.statusUnattributed
+          )
+          .font(.caption).foregroundStyle(.secondary)
+          .accessibilityIdentifier("sections-status")
           GroupBox("Connection") {
             VStack(alignment: .leading, spacing: 10) {
               TextField("Exact remote HTTPS origin", text: $model.origin).textContentType(.URL)

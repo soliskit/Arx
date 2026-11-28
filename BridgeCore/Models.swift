@@ -253,8 +253,27 @@ public struct Mutation: Codable, Sendable {
   }
 }
 
+/// Read-only section membership for one reminder. Exactly one of `name` and
+/// `unknownReason` is set. A failed or unverifiable lookup is always Unknown,
+/// never an absence of a section.
+public struct SectionLabel: Codable, Equatable, Sendable {
+  public var name: String?
+  public var unknownReason: String?
+  public static func named(_ name: String) -> SectionLabel { .init(name: name, unknownReason: nil) }
+  public static func unknown(_ reason: String) -> SectionLabel {
+    .init(name: nil, unknownReason: reason)
+  }
+  public static let unavailable = SectionLabel.unknown("section reading unavailable")
+}
+
 public struct ReminderPage: Codable, Sendable {
+  /// Section names are read only for lists up to this many reminders, matching the
+  /// native helper's own whole-list bound. Larger lists read as Unknown.
+  public static let sectionReadLimit = 200
   public var items: [SharedReminder]
+  /// Section label per reminder id on this page. Kept apart from `SharedReminder`
+  /// so edit bases and mutations are unchanged by section reading.
+  public var sections: [String: SectionLabel] = [:]
   public var next: String?
   public var previous: String?
 }
@@ -267,4 +286,13 @@ public struct ReminderPage: Codable, Sendable {
   func create(in list: String, fields: ReminderFields) throws -> SharedReminder
   func save(_ item: SharedReminder, replacing base: SharedReminder) throws -> SharedReminder
   func remove(_ item: SharedReminder) throws
+  /// Read-only section labels for reminders already read from `list`. A store that
+  /// cannot read sections answers Unknown for every id. Never writes.
+  func sectionLabels(in list: String, ids: [String]) async -> [String: SectionLabel]
+}
+
+extension ReminderStore {
+  public func sectionLabels(in list: String, ids: [String]) async -> [String: SectionLabel] {
+    Dictionary(ids.map { ($0, SectionLabel.unavailable) }, uniquingKeysWith: { first, _ in first })
+  }
 }

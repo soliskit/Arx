@@ -1,0 +1,60 @@
+name: Local Sections proof synthetic checks
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  foundation-fixtures:
+    runs-on: xcode-27
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run synthetic exact-object checks without EventKit or native provider
+        run: |
+          set -euo pipefail
+          ROOT=SectionsWorker
+          xcrun clang -fobjc-arc -Wall -Wextra -Werror -DARX_SECTION_READER_FIXTURES=1 -I "$ROOT" -framework Foundation "$ROOT/ExactReader.m" experiments/sections-local/ExactFixtures.m -o "$RUNNER_TEMP/local-identity-fixtures"
+          "$RUNNER_TEMP/local-identity-fixtures"
+          xcrun clang -std=c11 -Wall -Wextra -Werror -I "$ROOT" experiments/sections-local/gates-test.c -o "$RUNNER_TEMP/local-section-gates"
+          "$RUNNER_TEMP/local-section-gates"
+      - name: Run bounded fixture transport with all native paths compiled out
+        run: |
+          set -euo pipefail
+          ROOT=SectionsWorker
+          xcrun clang -fobjc-arc -Wall -Wextra -Werror -DARX_SECTION_READER_FIXTURES=1 -I "$ROOT" -framework Foundation "$ROOT/Worker.m" experiments/sections-local/WorkerFixtureMain.m -o "$RUNNER_TEMP/local-worker-fixture"
+          python3 experiments/sections-local/transport-fixtures.py "$RUNNER_TEMP/local-worker-fixture"
+      - name: Check source-stamp logic using disposable Git fixtures
+        run: python3 -I -B scripts/sections-source-stamp-tests.py
+      - name: Select Xcode 27.2 for app and helper compilation
+        run: |
+          if [ -d /Applications/Xcode_27.2.app ]; then
+            sudo xcode-select -s /Applications/Xcode_27.2.app/Contents/Developer
+          fi
+          xcodebuild -version
+      - name: Compile the opt-in attributed app and helper without launching either
+        run: |
+          set -euo pipefail
+          observe_state() {
+            if python3 -I -B scripts/sections-source-stamp.py --observe-build-state "$1"; then
+              :
+            else
+              printf '%s\n' 'Sections stamp build-state observation unavailable'
+            fi
+          }
+          python3 -I -B scripts/sections-source-stamp.py --prepare-git-metadata-inputs
+          observe_state before_build
+          trap 'result=$?; trap - EXIT; observe_state after_build; exit "$result"' EXIT
+          xcodebuild build -project Arx.xcodeproj -scheme Arx -configuration Debug -xcconfig scripts/sections-attribution.xcconfig -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO -derivedDataPath .build/sections-proof
+          python3 -I -B scripts/sections-verify-build-stamps.py attributed .build/sections-proof
+      - name: Compile the ordinary route with untracked source and no attribution admission
+        run: |
+          set -euo pipefail
+          test ! -e sections-attribution-dirty-fixture.txt
+          trap 'rm -f sections-attribution-dirty-fixture.txt' EXIT
+          printf '%s\n' 'disposable untracked build qualification fixture' > sections-attribution-dirty-fixture.txt
+          xcodebuild build -project Arx.xcodeproj -scheme Arx -configuration Debug -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO -derivedDataPath .build/sections-proof
+          python3 -I -B scripts/sections-verify-build-stamps.py ordinary .build/sections-proof
