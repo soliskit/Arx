@@ -24,6 +24,9 @@ import Foundation
       store.rows[id] = SharedReminder(
         id: id, listID: "pages", fields: .init(title: "Page fixture \(index)"))
     }
+    // One reminder has a verified section name; every other fixture reminder
+    // stays Unknown, so the browser proof sees both display paths.
+    store.sectionLabelsByID["book"] = .named("Fixture section")
     let controller = SharingController(store: store)
     try controller.start()
     var rights = ClientRights()

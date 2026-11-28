@@ -39,6 +39,15 @@ import Foundation
     try access()
     return identifiers
   }
+  /// Read-only. The helper receives only the list this client may already read.
+  func sectionLabels(in list: String, ids: [String]) async -> [String: SectionLabel] {
+    guard let calendar = try? calendar(list), !calendar.source.sourceIdentifier.isEmpty else {
+      return Dictionary(
+        ids.map { ($0, SectionLabel.unavailable) }, uniquingKeysWith: { first, _ in first })
+    }
+    return await SectionsReader.read(
+      sourceID: calendar.source.sourceIdentifier, listID: calendar.calendarIdentifier, ids: ids)
+  }
   func current(_ id: String) throws -> SharedReminder { snapshot(try object(id)) }
   func create(in list: String, fields: ReminderFields) throws -> SharedReminder {
     let item = try Self.precommit {

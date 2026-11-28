@@ -228,8 +228,24 @@ import Foundation
       guard let item = try? store.current(key), item.listID == list else { return nil }
       return item
     }
+    // Labels are read after the items so that they describe the same page. Re-check the
+    // client's access afterwards, as for the identifier fetch above.
+    // A list over the helper's bound reads as Unknown without starting a read. The
+    // count comes from this same fetch, so a list that shrinks is read again.
+    let labels: [String: SectionLabel] =
+      identifiers.count > ReminderPage.sectionReadLimit
+      ? Dictionary(
+        items.map {
+          ($0.id, SectionLabel.unknown("list over \(ReminderPage.sectionReadLimit) reminders"))
+        }, uniquingKeysWith: { first, _ in first })
+      : await store.sectionLabels(in: list, ids: items.map(\.id))
+    _ = try session(token)
+    guard try require(id, list: list) == revision else { throw BridgeFailure.denied }
+    var sections: [String: SectionLabel] = [:]
+    for item in items { sections[item.id] = labels[item.id] ?? .unavailable }
     return ReminderPage(
       items: items,
+      sections: sections,
       next: try sealCursor(
         page.last.flatMap { last in sorted.last.map { $0 > last } == true ? last : nil },
         client: id, list: list),

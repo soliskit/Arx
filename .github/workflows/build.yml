@@ -251,6 +251,10 @@ jobs:
         run: |
           set -euo pipefail
           APP=.build/Build/Products/Debug/Arx.app
+          HELPER="$APP/Contents/MacOS/ArxSectionsWorker"
+          codesign --force --sign - --options runtime --entitlements SectionsWorkerTool/ArxSectionsWorker.entitlements "$HELPER"
+          codesign --verify --strict --verbose=2 "$HELPER"
+          codesign -d --entitlements :- "$HELPER" > helper-entitlements.plist
           codesign --force --sign - --options runtime --entitlements Arx/Arx.entitlements "$APP"
           codesign --verify --strict --verbose=2 "$APP"
           codesign -d --entitlements :- "$APP" > effective-entitlements.plist
@@ -263,7 +267,26 @@ jobs:
           assert actual.get('com.apple.security.app-sandbox') is True
           assert actual.get('com.apple.security.network.server') is True
           assert actual.get('com.apple.security.personal-information.calendars') is True
+          helper = plistlib.loads(Path('helper-entitlements.plist').read_bytes())
+          helper_expected = plistlib.loads(Path('SectionsWorkerTool/ArxSectionsWorker.entitlements').read_bytes())
+          assert helper == helper_expected, (helper, helper_expected)
+          assert set(helper) == {'com.apple.security.app-sandbox', 'com.apple.security.inherit'}, set(helper)
+          assert helper['com.apple.security.app-sandbox'] is True
+          assert helper['com.apple.security.inherit'] is True
+          assert 'com.apple.security.get-task-allow' not in helper
           PYTHON
+      - name: Probe the signed helper transport
+        run: |
+          set -euo pipefail
+          APP=.build/Build/Products/Debug/Arx.app/Contents/MacOS/Arx
+          status=0
+          "$APP" --sections-local-helper-fixtures > helper-smoke.out || status=$?
+          cat helper-smoke.out
+          test "$status" -eq 69
+          head -n 1 helper-smoke.out | grep -Fx 'stage=input.read.before'
+          grep -F 'fixture_no_provider' helper-smoke.out
+          echo 'Applicability: the signed app spawns the signed helper in synthetic fixture mode.'
+          echo 'A first pass is feasibility evidence for the composition, not decisive proof.'
       - name: Run the Mac navigation tests
         run: xcodebuild test -project Arx.xcodeproj -scheme Arx -destination 'platform=macOS' -only-testing:ArxTests CODE_SIGNING_ALLOWED=NO MACOSX_DEPLOYMENT_TARGET=27.0 -derivedDataPath .build-unit-tests -resultBundlePath navigation-tests.xcresult
 

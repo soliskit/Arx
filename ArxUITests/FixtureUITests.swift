@@ -24,6 +24,15 @@ final class FixtureUITests: XCTestCase {
   }
 
   @MainActor
+  func testSectionsStatusIsReadOnly() throws {
+    let status = app.staticTexts["sections-status"]
+    XCTAssertTrue(status.waitForExistence(timeout: 10))
+    // Fixture mode serves fixture labels, so the read-only wording applies.
+    XCTAssertTrue(status.label.contains("read-only"))
+    XCTAssertTrue(status.label.contains("Unknown"))
+  }
+
+  @MainActor
   func testFixtureBannerAndGrantControls() throws {
     XCTAssertTrue(
       app.staticTexts["Fixture data - no real Reminders access"].waitForExistence(timeout: 10))

@@ -97,10 +97,102 @@
       );
     }
   }
+  // Section labels are read-only and arrive beside the reminders, keyed by id.
+  // Anything that is not exactly a name or an unknown reason, or is missing, is
+  // Unknown, and a lookup that failed is never shown as an empty answer.
+  const UNKNOWN_TEXT = "Unknown";
+  const compareText = (a, b) => {
+    if (a < b) {
+      return -1;
+    }
+    return a > b ? 1 : 0;
+  };
+  function sectionLabel(sections, id) {
+    const raw =
+      sections !== null &&
+      typeof sections === "object" &&
+      !Array.isArray(sections)
+        ? Object.getOwnPropertyDescriptor(sections, id)?.value
+        : undefined;
+    const hasName = typeof raw?.name === "string" && raw.name.length > 0;
+    const hasReason = typeof raw?.unknownReason === "string";
+    if (hasName && !hasReason) {
+      return { kind: "named", name: raw.name };
+    }
+    return {
+      kind: "unknown",
+      reason: hasReason && !hasName ? raw.unknownReason : "",
+    };
+  }
+  function sectionText(label) {
+    return label.kind === "named" ? label.name : UNKNOWN_TEXT;
+  }
+  // Distinct filter choices for the rows on this page: every named section by
+  // name, then Unknown when any row has one.
+  function sectionChoices(rows, sections) {
+    const names = new Set();
+    let unknown = false;
+    for (const row of rows) {
+      const label = sectionLabel(sections, row.id);
+      if (label.kind === "named") {
+        names.add(label.name);
+      } else {
+        unknown = true;
+      }
+    }
+    const choices = [...names]
+      .sort(compareText)
+      .map((name) => ({ kind: "named", name }));
+    if (unknown) {
+      choices.push({ kind: "unknown" });
+    }
+    return choices;
+  }
+  function matchesFilter(label, filter) {
+    if (!filter || filter.kind === "all") {
+      return true;
+    }
+    if (filter.kind === "unknown") {
+      return label.kind === "unknown";
+    }
+    return label.kind === "named" && label.name === filter.name;
+  }
+  // Groups keep the server's row order inside each group. Named groups come
+  // first by name, Unknown last. grouped=false returns one group in row order.
+  function arrangeBySection(rows, sections, filter, grouped) {
+    const kept = [];
+    for (const row of rows) {
+      const label = sectionLabel(sections, row.id);
+      if (matchesFilter(label, filter)) {
+        kept.push({ row, label });
+      }
+    }
+    if (!grouped) {
+      return [{ title: "", label: null, rows: kept.map((k) => k.row) }];
+    }
+    const groups = new Map();
+    for (const { row, label } of kept) {
+      const key = label.kind === "named" ? `n:${label.name}` : "u";
+      if (!groups.has(key)) {
+        groups.set(key, { title: sectionText(label), label, rows: [] });
+      }
+      groups.get(key).rows.push(row);
+    }
+    return [...groups.values()].sort((a, b) => {
+      if (a.label.kind !== b.label.kind) {
+        return a.label.kind === "named" ? -1 : 1;
+      }
+      return compareText(a.title, b.title);
+    });
+  }
   globalThis.ArxLogic = {
     formatDate,
     formatTime,
     validSession,
     validateAdvancedJSON,
+    sectionLabel,
+    sectionText,
+    sectionChoices,
+    arrangeBySection,
   };
 })();

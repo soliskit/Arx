@@ -343,6 +343,17 @@ try {
   );
   await enabled();
   await screenshot("02-selected-list");
+  // Section names are read-only display: a verified name and Unknown.
+  assert.equal(
+    await evaluate(
+      '[...document.querySelectorAll("#reminders article")].find(a=>a.textContent.includes("Return the library book")).querySelector(".section-name").textContent',
+    ),
+    "Section: Fixture section",
+  );
+  assert.equal(
+    await evaluate('document.getElementById("section-tools").hidden'),
+    false,
+  );
   await evaluate(
     '[...document.querySelectorAll("#lists button")].find(b=>b.textContent==="Paged fixture").click()',
   );
@@ -358,6 +369,12 @@ try {
     true,
   );
   await screenshot("02b-last-page");
+  assert.equal(
+    await evaluate(
+      '[...document.querySelectorAll("#reminders .section-name")].every(n=>n.textContent==="Section: Unknown")',
+    ),
+    true,
+  );
   await evaluate('document.getElementById("previous").click()');
   await until("!busy && rows.length===100");
   await evaluate(
